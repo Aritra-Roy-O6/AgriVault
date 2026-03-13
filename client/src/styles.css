@@ -1132,3 +1132,172 @@ h1,h2,h3,h4 {
   border-radius: 14px;
   background: rgba(20, 33, 61, 0.04);
 }
+.hash-text {
+  word-break: break-all;
+  font-size: 0.8rem;
+}
+
+.navbar-minimal {
+  justify-content: space-between;
+}
+
+.navbar-brand-button {
+  border: none;
+  background: transparent;
+  padding: 0;
+  cursor: pointer;
+}
+
+.navbar-nav-minimal {
+  gap: 8px;
+}
+
+.home-minimal {
+  gap: 20px;
+}
+
+.home-hero-compact {
+  max-width: 860px;
+  margin: 0 auto;
+}
+
+.home-copy-compact {
+  max-width: 640px;
+}
+
+.role-panel-grid {
+  display: grid;
+  gap: 16px;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+}
+
+.role-panel {
+  display: grid;
+  gap: 12px;
+}
+
+.role-panel-business,
+.role-panel-owner {
+  border-color: rgba(59, 130, 246, 0.25);
+  background: linear-gradient(180deg, rgba(59, 130, 246, 0.08), rgba(255, 255, 255, 0.04));
+}
+
+.role-panel-farmer {
+  border-color: rgba(34, 197, 94, 0.25);
+  background: linear-gradient(180deg, rgba(34, 197, 94, 0.1), rgba(255, 255, 255, 0.04));
+}
+
+.auth-page-grid {
+  display: grid;
+  gap: 20px;
+  grid-template-columns: minmax(260px, 340px) minmax(0, 520px);
+  align-items: stretch;
+}
+
+.auth-role-column {
+  display: grid;
+  gap: 14px;
+}
+
+.auth-role-card {
+  text-align: left;
+  border-radius: var(--r-lg);
+  border: 1px solid var(--clr-border);
+  background: var(--clr-surface);
+  color: var(--clr-ink);
+  padding: 20px;
+  cursor: pointer;
+  transition: transform var(--dur) var(--ease), border-color var(--dur) var(--ease), box-shadow var(--dur) var(--ease);
+}
+
+.auth-role-card:hover {
+  transform: translateY(-2px);
+}
+
+.auth-role-card.active {
+  box-shadow: var(--shadow-float);
+}
+
+.auth-theme-business,
+.auth-theme-owner {
+  border-color: rgba(59, 130, 246, 0.3);
+  background: linear-gradient(180deg, rgba(30, 64, 175, 0.14), rgba(255, 255, 255, 0.04));
+}
+
+.auth-theme-farmer {
+  border-color: rgba(34, 197, 94, 0.3);
+  background: linear-gradient(180deg, rgba(20, 83, 45, 0.18), rgba(255, 255, 255, 0.04));
+}
+
+.auth-card-wide {
+  max-width: 520px;
+}
+
+.dashboard-theme {
+  gap: 18px;
+}
+
+.dashboard-hero {
+  display: flex;
+  justify-content: space-between;
+  gap: 16px;
+  align-items: flex-start;
+  padding: 20px 22px;
+  border-radius: var(--r-lg);
+  border: 1px solid var(--clr-border);
+}
+
+.dashboard-hero-business {
+  background: linear-gradient(135deg, rgba(30, 64, 175, 0.2), rgba(15, 23, 42, 0.4));
+  border-color: rgba(59, 130, 246, 0.3);
+}
+
+.dashboard-hero-farmer {
+  background: linear-gradient(135deg, rgba(22, 101, 52, 0.28), rgba(15, 23, 42, 0.35));
+  border-color: rgba(34, 197, 94, 0.3);
+}
+
+.dashboard-toolbar {
+  display: grid;
+  gap: 12px;
+  justify-items: end;
+}
+
+.language-switcher {
+  display: flex;
+  gap: 8px;
+  flex-wrap: wrap;
+}
+
+.dashboard-theme-farmer .card,
+.dashboard-theme-farmer .booking-card {
+  border-color: rgba(34, 197, 94, 0.16);
+}
+
+.dashboard-theme-business .card,
+.dashboard-theme-business .booking-card,
+.dashboard-theme-owner .card,
+.dashboard-theme-owner .booking-card {
+  border-color: rgba(59, 130, 246, 0.16);
+}
+
+.dashboard-count-chip {
+  margin-left: 6px;
+  padding: 2px 7px;
+  font-size: 0.7rem;
+}
+
+@media (max-width: 900px) {
+  .role-panel-grid,
+  .auth-page-grid {
+    grid-template-columns: 1fr;
+  }
+
+  .dashboard-hero {
+    flex-direction: column;
+  }
+
+  .dashboard-toolbar {
+    justify-items: start;
+  }
+}

@@ -2,10 +2,20 @@ import { Link } from "react-router-dom";
 import { MapContainer, Marker, Popup, TileLayer } from "react-leaflet";
 import "leaflet/dist/leaflet.css";
 
-export default function MapView({ warehouses = [] }) {
+export default function MapView({ warehouses = [], labels }) {
   const center = warehouses.length
     ? [warehouses[0].lat, warehouses[0].lng]
     : [22.5726, 88.3639];
+
+  const copy = {
+    spaceTypeFallback: labels?.spaceTypeFallback || "storage space",
+    available: labels?.available || "Available",
+    categories: labels?.categories || "Categories",
+    environment: labels?.environment || "Environment",
+    general: labels?.general || "general",
+    match: labels?.match || "Smart match",
+    book: labels?.book || "Book This Space",
+  };
 
   return (
     <div className="map-frame">
@@ -19,12 +29,14 @@ export default function MapView({ warehouses = [] }) {
             <Popup>
               <div className="map-popup">
                 <strong>{warehouse.name}</strong>
-                <p>?{warehouse.pricePerSqft}/sq ft/month</p>
-                <p>Available: {warehouse.availableSqft || warehouse.sqft} sq ft</p>
-                <p>Accepted: {(warehouse.produces || []).join(", ")}</p>
-                <p>Rating: {warehouse.rating || 4.6}</p>
+                <p>{warehouse.spaceType || copy.spaceTypeFallback}</p>
+                <p>Rs {warehouse.pricePerSqft}/{warehouse.pricingUnit || "month"}</p>
+                <p>{copy.available}: {warehouse.availableSqft || warehouse.sqft} sq ft</p>
+                <p>{copy.categories}: {(warehouse.supportedCategories || warehouse.produces || []).join(", ")}</p>
+                <p>{copy.environment}: {(warehouse.environmentTags || []).join(", ") || copy.general}</p>
+                {warehouse.matchScore ? <p>{copy.match}: {warehouse.matchScore}%</p> : null}
                 <Link className="button map-popup-button" to={`/book?warehouseId=${warehouse.id}`}>
-                  Book This Space
+                  {copy.book}
                 </Link>
               </div>
             </Popup>

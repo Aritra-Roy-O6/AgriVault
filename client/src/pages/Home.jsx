@@ -1,85 +1,54 @@
 import { Link } from "react-router-dom";
 
-const features = [
+const roleCards = [
   {
-    title: "Map-Based Search",
-    desc: "Find verified warehouses near you on an interactive map with real-time availability.",
+    title: "For Businesses",
+    text: "Book nearby storage for inventory, overflow stock, and short-term space needs.",
+    link: "/auth?role=business",
+    tone: "role-panel-business",
   },
   {
-    title: "AI Produce Grading",
-    desc: "Upload a photo and get instant AI-powered quality grades for your produce.",
+    title: "For Farmers",
+    text: "Use FarmVault for produce storage, optional grading, and receipt-linked records.",
+    link: "/auth?role=farmer",
+    tone: "role-panel-farmer",
   },
   {
-    title: "Digital Receipts",
-    desc: "Download PDF receipts with cost breakdowns and loan eligibility instantly.",
-  },
-  {
-    title: "Instant Booking",
-    desc: "Lock in warehouse slots in seconds. Owners confirm with a single tap.",
+    title: "For Space Owners",
+    text: "List a room, garage, godown, or warehouse bay and manage all incoming bookings.",
+    link: "/auth?role=owner",
+    tone: "role-panel-owner",
   },
 ];
 
 export default function Home() {
   return (
-    <main className="page fade-up">
-      <section className="page two-column">
-        <div className="card accent-card">
-          <div className="hero-eyebrow">Agricultural Storage Platform</div>
-          <h1 className="hero-title">
-            Store Smart.
-            <br />
-            <span className="highlight">Grow More.</span>
-          </h1>
-          <p className="hero-sub">
-            AgriVault connects farmers with verified warehouses and gives owners a practical way to manage space and bookings.
-          </p>
-          <div className="actions">
-            <Link className="button" to="/auth?role=farmer">
-              I&apos;m a Farmer
-            </Link>
-            <Link className="button-secondary" to="/auth?role=owner">
-              I Own a Space
-            </Link>
-          </div>
-        </div>
-
-        <div className="card">
-          <p className="eyebrow">Auth</p>
-          <h2>Access the platform</h2>
-          <p>Use a farmer or owner account to access the correct dashboard. The other dashboard is blocked by role.</p>
-          <div className="actions">
-            <Link className="button" to="/auth">
-              Login / Register
-            </Link>
-          </div>
-        </div>
-      </section>
-
-      <section className="card">
-        <p className="eyebrow">Features</p>
-        <div style={{ display: "grid", gap: "20px" }}>
-          {features.map((feature) => (
-            <div className="feature-card" key={feature.title}>
-              <h4>{feature.title}</h4>
-              <p>{feature.desc}</p>
-            </div>
-          ))}
-        </div>
-      </section>
-
-      <section className="card">
-        <p className="eyebrow">About Us</p>
-        <h2>Built for practical storage coordination</h2>
-        <p>
-          Farmers need clear pricing and available space. Owners need simple listing and booking management. AgriVault keeps those flows separate and role-based.
+    <main className="page fade-up home-minimal">
+      <section className="card home-hero-compact">
+        <p className="eyebrow">Storage Marketplace</p>
+        <h1 className="hero-title">Find, book, and manage storage without the usual friction.</h1>
+        <p className="hero-sub home-copy-compact">
+          VaultX connects businesses, farmers, and space owners through one shared platform. Start with your role and the right dashboard opens after sign-in.
         </p>
+        <div className="actions">
+          <Link className="button" to="/auth?role=business">
+            Login / Sign Up
+          </Link>
+        </div>
       </section>
 
-      <footer className="card">
-        <p className="eyebrow">Footer</p>
-        <p>AgriVault</p>
-        <p>Verified storage discovery, booking workflows, AI grading, and digital receipts.</p>
-      </footer>
+      <section className="role-panel-grid">
+        {roleCards.map((card) => (
+          <article className={`card role-panel ${card.tone}`} key={card.title}>
+            <p className="eyebrow">{card.title}</p>
+            <h3>{card.title}</h3>
+            <p>{card.text}</p>
+            <Link className="button-secondary" to={card.link}>
+              Continue
+            </Link>
+          </article>
+        ))}
+      </section>
     </main>
   );
 }

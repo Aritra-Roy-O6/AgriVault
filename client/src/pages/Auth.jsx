@@ -2,12 +2,38 @@ import {
   createUserWithEmailAndPassword,
   signInWithEmailAndPassword,
 } from "firebase/auth";
-import { useEffect, useState } from "react";
+import { useEffect, useMemo, useState } from "react";
 import toast from "react-hot-toast";
 import { useNavigate, useSearchParams } from "react-router-dom";
 import { auth, apiBaseUrl } from "../firebase";
 
-const createInitialForm = (role = "farmer") => ({
+const roleMeta = {
+  business: {
+    label: "Businessmen",
+    eyebrow: "Blue Flow",
+    title: "Storage for inventory and overflow stock",
+    description: "Best for retailers, sellers, traders, and small businesses booking storage in English.",
+    themeClass: "auth-theme-business",
+  },
+  owner: {
+    label: "Space Owners",
+    eyebrow: "Blue Flow",
+    title: "List and manage your storage space",
+    description: "Best for owners listing rooms, garages, godowns, and warehouse bays.",
+    themeClass: "auth-theme-owner",
+  },
+  farmer: {
+    label: "Farmers",
+    eyebrow: "Green Flow",
+    title: "FarmVault for produce storage and grading",
+    description: "Best for farmers who need storage, quality receipts, and optional grading support.",
+    themeClass: "auth-theme-farmer",
+  },
+};
+
+const allowedRoles = Object.keys(roleMeta);
+
+const createInitialForm = (role = "business") => ({
   name: "",
   email: "",
   password: "",
@@ -16,13 +42,24 @@ const createInitialForm = (role = "farmer") => ({
   role,
 });
 
+function normalizeRole(candidate) {
+  return allowedRoles.includes(candidate) ? candidate : "business";
+}
+
+function roleRedirect(nextRole) {
+  if (nextRole === "owner") return "/dashboard/owner";
+  if (nextRole === "business") return "/dashboard/business";
+  return "/dashboard/farmer";
+}
+
 export default function Auth({ loading: sessionLoading, role, user }) {
   const [searchParams] = useSearchParams();
   const navigate = useNavigate();
-  const selectedRole = searchParams.get("role") === "owner" ? "owner" : "farmer";
+  const selectedRole = normalizeRole(searchParams.get("role"));
   const [isRegister, setIsRegister] = useState(true);
   const [form, setForm] = useState(() => createInitialForm(selectedRole));
   const [loading, setLoading] = useState(false);
+  const selectedMeta = useMemo(() => roleMeta[form.role], [form.role]);
 
   useEffect(() => {
     setForm((current) => ({ ...current, role: selectedRole }));
@@ -30,17 +67,12 @@ export default function Auth({ loading: sessionLoading, role, user }) {
 
   useEffect(() => {
     if (!sessionLoading && user && role) {
-      navigate(role === "owner" ? "/owner" : "/farmer", { replace: true });
+      navigate(roleRedirect(role), { replace: true });
     }
   }, [navigate, role, sessionLoading, user]);
 
-  const updateForm = (e) =>
-    setForm((c) => ({ ...c, [e.target.name]: e.target.value }));
-
-  const selectRole = (nextRole) =>
-    setForm((c) => ({ ...c, role: nextRole }));
-
-  const getRoleRedirect = (nextRole) => (nextRole === "owner" ? "/owner" : "/farmer");
+  const updateForm = (event) =>
+    setForm((current) => ({ ...current, [event.target.name]: event.target.value }));
 
   const registerProfile = async (nextUser, overrides = {}) => {
     const token = await nextUser.getIdToken();
@@ -90,15 +122,15 @@ export default function Auth({ loading: sessionLoading, role, user }) {
     });
   };
 
-  const handleSubmit = async (e) => {
-    e.preventDefault();
+  const handleSubmit = async (event) => {
+    event.preventDefault();
     setLoading(true);
     try {
       if (isRegister) {
         const credential = await createUserWithEmailAndPassword(auth, form.email, form.password);
         const userProfile = await registerProfile(credential.user);
-        toast.success("Account created!");
-        navigate(getRoleRedirect(userProfile.role), { replace: true });
+        toast.success("Account created.");
+        navigate(roleRedirect(userProfile.role), { replace: true });
       } else {
         const credential = await signInWithEmailAndPassword(auth, form.email, form.password);
         let userProfile;
@@ -109,12 +141,11 @@ export default function Auth({ loading: sessionLoading, role, user }) {
           if (error.status !== 404) {
             throw error;
           }
-
           userProfile = await bootstrapMissingProfile(credential.user);
         }
 
-        toast.success("Welcome back!");
-        navigate(getRoleRedirect(userProfile.role), { replace: true });
+        toast.success("Signed in.");
+        navigate(roleRedirect(userProfile.role), { replace: true });
       }
       setForm(createInitialForm(selectedRole));
     } catch (error) {
@@ -125,39 +156,31 @@ export default function Auth({ loading: sessionLoading, role, user }) {
   };
 
   return (
-    <main className="auth-center fade-up">
-      <div className="card auth-card">
-        <p className="eyebrow">{isRegister ? "Create your account" : "Welcome back"}</p>
-        <h2 style={{ marginBottom: "0.25rem" }}>{isRegister ? "Join AgriVault" : "Sign in"}</h2>
-        <p style={{ fontSize: "0.88rem", marginBottom: "1.5rem" }}>
-          {isRegister
-            ? "Start connecting with verified warehouses today."
-            : "Access your farmer or owner dashboard."}
-        </p>
+    <main className="auth-center fade-up auth-page-grid">
+      <section className="auth-role-column">
+        {allowedRoles.map((candidate) => {
+          const meta = roleMeta[candidate];
+          const active = form.role === candidate;
 
-        {isRegister ? (
-          <div style={{ marginBottom: "1.25rem" }}>
-            <div className="field" style={{ marginBottom: "8px" }}>
-              <span>I am a</span>
-            </div>
-            <div className="role-selector">
-              <button
-                type="button"
-                className={`role-btn${form.role === "farmer" ? " selected" : ""}`}
-                onClick={() => selectRole("farmer")}
-              >
-                <span className="role-btn-icon">Farmer</span>
-              </button>
-              <button
-                type="button"
-                className={`role-btn${form.role === "owner" ? " selected" : ""}`}
-                onClick={() => selectRole("owner")}
-              >
-                <span className="role-btn-icon">Owner</span>
-              </button>
-            </div>
-          </div>
-        ) : null}
+          return (
+            <button
+              className={`auth-role-card ${meta.themeClass}${active ? " active" : ""}`}
+              key={candidate}
+              onClick={() => setForm((current) => ({ ...current, role: candidate }))}
+              type="button"
+            >
+              <p className="eyebrow">{meta.eyebrow}</p>
+              <h3>{meta.label}</h3>
+              <p>{meta.description}</p>
+            </button>
+          );
+        })}
+      </section>
+
+      <section className={`card auth-card auth-card-wide ${selectedMeta.themeClass}`}>
+        <p className="eyebrow">{selectedMeta.eyebrow}</p>
+        <h2 style={{ marginBottom: "0.25rem" }}>{isRegister ? selectedMeta.title : `Sign in as ${selectedMeta.label}`}</h2>
+        <p style={{ fontSize: "0.88rem", marginBottom: "1.5rem" }}>{selectedMeta.description}</p>
 
         <form className="form-grid" onSubmit={handleSubmit}>
           {isRegister ? (
@@ -195,22 +218,22 @@ export default function Auth({ loading: sessionLoading, role, user }) {
           </label>
 
           <button className="button button-full" disabled={loading} type="submit" style={{ marginTop: "4px" }}>
-            {loading ? "Please wait..." : isRegister ? "Create Account" : "Sign In"}
+            {loading ? "Please wait..." : isRegister ? `Create ${selectedMeta.label} Account` : `Sign In`}
           </button>
         </form>
 
         <div style={{ textAlign: "center", marginTop: "1.25rem", fontSize: "0.875rem" }}>
-          {isRegister ? "Already have an account? " : "Don't have an account? "}
+          {isRegister ? "Already have an account? " : "Need an account? "}
           <button
             className="text-button"
-            onClick={() => setIsRegister((v) => !v)}
+            onClick={() => setIsRegister((value) => !value)}
             type="button"
             style={{ fontSize: "0.875rem", fontWeight: 700 }}
           >
             {isRegister ? "Sign in" : "Create one"}
           </button>
         </div>
-      </div>
+      </section>
     </main>
   );
 }

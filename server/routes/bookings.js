@@ -15,6 +15,10 @@ function getWarehouseRefs(warehouse) {
   return { totalSqft, availableSqft };
 }
 
+function requiredString(value) {
+  return typeof value === "string" && value.trim().length > 0;
+}
+
 router.get("/farmer/:uid", verifyToken, async (req, res) => {
   try {
     if (req.user.uid !== req.params.uid) {
@@ -87,21 +91,68 @@ router.get("/:id", verifyToken, async (req, res) => {
 
 router.post("/", verifyToken, async (req, res) => {
   try {
-    const warehouseRef = db.collection("warehouses").doc(req.body.warehouseId);
+    const requiredFields = [
+      [requiredString(req.body.warehouseId), "Warehouse is required."],
+      [requiredString(req.body.farmerName), "Customer name is required."],
+      [requiredString(req.body.phone), "Phone is required."],
+      [requiredString(req.body.produce), "Storage category is required."],
+      [requiredString(req.body.startDate), "Start date is required."],
+    ];
+
+    const firstMissing = requiredFields.find(([valid]) => !valid);
+    if (firstMissing) {
+      return res.status(400).json({ message: firstMissing[1] });
+    }
+
     const requestedSqft = Number(req.body.sqft);
+    const weight = Number(req.body.weight || 0);
+    const duration = Number(req.body.duration);
+    const totalPrice = Number(req.body.totalPrice);
 
     if (!requestedSqft || requestedSqft <= 0) {
       return res.status(400).json({ message: "Requested square footage must be greater than zero." });
     }
 
+    if (!duration || duration <= 0) {
+      return res.status(400).json({ message: "Duration must be greater than zero." });
+    }
+
+    if (!totalPrice || totalPrice <= 0) {
+      return res.status(400).json({ message: "Total price must be greater than zero." });
+    }
+
+    const warehouseRef = db.collection("warehouses").doc(req.body.warehouseId);
+    const gradingSessionId = requiredString(req.body.gradingSessionId) ? req.body.gradingSessionId : null;
+    const gradingSessionRef = gradingSessionId ? db.collection("grading_sessions").doc(gradingSessionId) : null;
+
     const booking = await db.runTransaction(async (transaction) => {
-      const warehouseDoc = await transaction.get(warehouseRef);
+      const docs = [transaction.get(warehouseRef)];
+      if (gradingSessionRef) {
+        docs.push(transaction.get(gradingSessionRef));
+      }
+      const [warehouseDoc, gradingSessionDoc] = await Promise.all(docs);
 
       if (!warehouseDoc.exists) {
         throw new Error("Warehouse not found.");
       }
 
       const warehouse = warehouseDoc.data();
+      const gradingSession = gradingSessionDoc?.exists ? gradingSessionDoc.data() : null;
+
+      if (gradingSessionId && !gradingSessionDoc?.exists) {
+        throw new Error("Grading session not found.");
+      }
+
+      if (gradingSession) {
+        if (gradingSession.farmerId !== req.user.uid) {
+          throw new Error("This grading session does not belong to you.");
+        }
+
+        if (gradingSession.bookingId) {
+          throw new Error("This grading session has already been used for a booking.");
+        }
+      }
+
       const { availableSqft } = getWarehouseRefs(warehouse);
 
       if (availableSqft < requestedSqft) {
@@ -116,13 +167,21 @@ router.post("/", verifyToken, async (req, res) => {
         farmerName: req.body.farmerName,
         phone: req.body.phone,
         produce: req.body.produce,
-        weight: Number(req.body.weight),
+        weight,
         sqft: requestedSqft,
-        duration: Number(req.body.duration),
-        totalPrice: Number(req.body.totalPrice),
+        duration,
+        startDate: req.body.startDate,
+        totalPrice,
         pricePerSqft: Number(warehouse.pricePerSqft),
         loanEligibility: Number(req.body.loanEligibility || 0),
         estimatedProduceValue: Number(req.body.estimatedProduceValue || 0),
+        gradingSessionId,
+        gradeResult: gradingSession
+          ? {
+              ...gradingSession.normalizedGradeResult,
+              annotatedImageB64: null,
+            }
+          : null,
         status: "pending",
         spaceReserved: true,
         createdAt: new Date().toISOString(),
@@ -139,6 +198,20 @@ router.post("/", verifyToken, async (req, res) => {
         { merge: true }
       );
 
+      if (gradingSessionRef && gradingSession) {
+        transaction.set(
+          gradingSessionRef,
+          {
+            bookingId: bookingRef.id,
+            warehouseId: req.body.warehouseId,
+            ownerId: warehouse.ownerUid || "",
+            status: "attached",
+            updatedAt: new Date().toISOString(),
+          },
+          { merge: true }
+        );
+      }
+
       return {
         id: bookingRef.id,
         ...payload,
@@ -147,7 +220,10 @@ router.post("/", verifyToken, async (req, res) => {
 
     return res.status(201).json({ booking });
   } catch (error) {
-    const statusCode = error.message === "Warehouse not found." ? 404 : 400;
+    let statusCode = 400;
+    if (error.message === "Warehouse not found." || error.message === "Grading session not found.") {
+      statusCode = 404;
+    }
     return res.status(statusCode).json({ message: error.message });
   }
 });
@@ -258,34 +334,7 @@ router.post("/:id/grade", verifyToken, upload.single("produceImage"), async (req
       return res.status(400).json({ message: "Produce image is required." });
     }
 
-    const mlApiUrl = process.env.ML_API_URL;
-    const formData = new FormData();
-    const blob = new Blob([req.file.buffer], { type: req.file.mimetype });
-    formData.append("file", blob, req.file.originalname);
-
-    const mlResponse = await fetch(mlApiUrl, {
-      method: "POST",
-      body: formData,
-    });
-
-    if (!mlResponse.ok) {
-      const failureText = await mlResponse.text();
-      return res.status(502).json({
-        message: `ML API failed: ${failureText || mlResponse.statusText}`,
-      });
-    }
-
-    const mlData = await mlResponse.json();
-    const gradeResult = {
-      grade: mlData.grade || mlData.prediction || "Unknown",
-      confidence: mlData.confidence || null,
-      notes: mlData.notes || mlData.summary || "",
-      gradedAt: new Date().toISOString(),
-    };
-
-    await bookingRef.set({ gradeResult }, { merge: true });
-
-    return res.json({ gradeResult });
+    return res.status(501).json({ message: "Use /api/grading for FarmVault grading." });
   } catch (error) {
     return res.status(500).json({ message: error.message });
   }

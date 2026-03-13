@@ -1,8 +1,14 @@
 import { useEffect, useRef, useState } from "react";
 import { Link, useParams } from "react-router-dom";
 import toast from "react-hot-toast";
-import { apiBaseUrl, getAuthHeaders } from "../firebase";
+import { apiBaseUrl, auth, getAuthHeaders } from "../firebase";
 import GradeResult from "../components/GradeResult";
+
+const ALLOWED_IMAGE_TYPES = ["image/png", "image/jpeg", "image/jpg"];
+
+function isAllowedImage(file) {
+  return file && ALLOWED_IMAGE_TYPES.includes(file.type);
+}
 
 export default function GradeUpload() {
   const { bookingId } = useParams();
@@ -54,6 +60,11 @@ export default function GradeUpload() {
       return;
     }
 
+    if (!isAllowedImage(nextFile)) {
+      toast.error("Only PNG and JPEG images are allowed.");
+      return;
+    }
+
     if (preview) {
       URL.revokeObjectURL(preview);
     }
@@ -76,7 +87,7 @@ export default function GradeUpload() {
     event.preventDefault();
 
     if (!file) {
-      toast.error("Please select an image first.");
+      toast.error("Please select a PNG or JPEG image first.");
       return;
     }
 
@@ -85,9 +96,12 @@ export default function GradeUpload() {
       const headers = await getAuthHeaders();
       const formData = new FormData();
       formData.append("image", file);
-      formData.append("bookingId", bookingId);
+      formData.append("booking_id", bookingId);
+      formData.append("farmer_uid", auth.currentUser?.uid || booking?.farmerId || "");
+      formData.append("produce_type", booking?.produce || "wheat");
+      formData.append("include_annotated_image", "true");
 
-      const response = await fetch(`${apiBaseUrl}/api/grade`, {
+      const response = await fetch(`${apiBaseUrl}/api/grading/analyze`, {
         method: "POST",
         headers,
         body: formData,
@@ -95,11 +109,20 @@ export default function GradeUpload() {
       const data = await response.json();
 
       if (!response.ok) {
-        throw new Error(data.message || "Unable to grade produce.");
+        throw new Error(data.error || data.message || "Unable to grade produce.");
       }
 
-      setResult(data.gradeResult);
-      toast.success("Grading complete.");
+      setResult(data.gradeResult || data);
+      setBooking((current) =>
+        current
+          ? {
+              ...current,
+              gradingSessionId: data.session_id,
+              gradeResult: data.gradeResult || data,
+            }
+          : current
+      );
+      toast.success(data.fallback ? "Fallback grading used. Check ML service health." : "Grading complete.");
     } catch (error) {
       toast.error(error.message);
     } finally {
@@ -129,29 +152,14 @@ export default function GradeUpload() {
     );
   }
 
-  if (!["confirmed", "completed"].includes(booking.status)) {
-    return (
-      <main className="auth-center fade-up">
-        <div className="card auth-card">
-          <p className="eyebrow">AI Grading</p>
-          <h2>Only confirmed bookings can be graded</h2>
-          <p>Current booking status: {booking.status}</p>
-          <Link className="button" to="/farmer">
-            Back to Dashboard
-          </Link>
-        </div>
-      </main>
-    );
-  }
-
   return (
     <main className="page fade-up">
       <div className="row-between" style={{ marginBottom: "8px" }}>
         <div>
           <p className="eyebrow">AI Grading</p>
-          <h2 style={{ margin: 0 }}>Analyze Produce</h2>
+          <h2 style={{ margin: 0 }}>Analyze Farm Produce</h2>
         </div>
-        <Link className="button-ghost" to="/farmer">
+        <Link className="button-ghost" to="/dashboard/farmer">
           Back
         </Link>
       </div>
@@ -176,11 +184,11 @@ export default function GradeUpload() {
                 <>
                   <span className="upload-zone-icon">Upload</span>
                   <p style={{ fontWeight: 700, margin: 0 }}>Drop image here or click to browse</p>
-                  <p style={{ fontSize: "0.8rem", margin: 0 }}>JPG, PNG, WEBP</p>
+                  <p style={{ fontSize: "0.8rem", margin: 0 }}>PNG, JPG, JPEG only</p>
                 </>
               )}
               <input
-                accept="image/*"
+                accept=".png,.jpg,.jpeg,image/png,image/jpeg"
                 onChange={(event) => handleFile(event.target.files?.[0])}
                 ref={fileRef}
                 style={{ display: "none" }}
@@ -194,7 +202,7 @@ export default function GradeUpload() {
                   <span className="spinner" /> Analyzing Produce...
                 </>
               ) : (
-                "Analyze Produce"
+                "Analyze Farm Produce"
               )}
             </button>
           </form>
@@ -205,9 +213,11 @@ export default function GradeUpload() {
             <div className="card">
               <GradeResult result={result} />
               <div className="actions" style={{ marginTop: "16px" }}>
-                <Link className="button" to={`/receipt/${bookingId}`}>
-                  Download Receipt
-                </Link>
+                {booking.gradingSessionId ? (
+                  <Link className="button" to={`/receipt/${bookingId}`}>
+                    Download Receipt
+                  </Link>
+                ) : null}
               </div>
             </div>
           ) : (
@@ -215,7 +225,7 @@ export default function GradeUpload() {
               <div className="empty-state">
                 <span className="empty-state-icon">AI</span>
                 <p className="empty-state-title">AI Grade Result</p>
-                <p className="empty-state-sub">Upload a produce image to get grade, BIS reference, and bank eligibility status.</p>
+                <p className="empty-state-sub">Upload a PNG or JPEG produce image to get grade, BIS reference, bank eligibility status, and the annotated YOLO output.</p>
               </div>
             </div>
           )}
@@ -224,3 +234,4 @@ export default function GradeUpload() {
     </main>
   );
 }
+

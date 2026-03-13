@@ -1,0 +1,17 @@
+names:
+- wheat
+- rice
+- maize
+- sorghum
+- pulse
+- broken_grain
+- discolored
+- shriveled
+- foreign_seed
+- insect_damage
+- mold_spot
+nc: 11
+path: /content/data/agrivault_dataset
+test: test/images
+train: train/images
+val: val/images

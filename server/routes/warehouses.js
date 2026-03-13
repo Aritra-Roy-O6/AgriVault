@@ -4,6 +4,21 @@ import verifyToken from "../middleware/verifyToken.js";
 
 const router = express.Router();
 
+function parseList(value, fallback = []) {
+  if (Array.isArray(value)) {
+    return value.map((item) => String(item).trim()).filter(Boolean);
+  }
+
+  if (typeof value === "string") {
+    return value
+      .split(",")
+      .map((item) => item.trim())
+      .filter(Boolean);
+  }
+
+  return fallback;
+}
+
 router.get("/", async (_req, res) => {
   try {
     const snapshot = await db.collection("warehouses").where("verified", "==", true).get();
@@ -67,7 +82,12 @@ router.post("/", verifyToken, async (req, res) => {
       sqft: Number(req.body.sqft),
       availableSqft: Number(req.body.availableSqft ?? req.body.sqft),
       pricePerSqft: Number(req.body.pricePerSqft),
-      produces: Array.isArray(req.body.produces) ? req.body.produces : [],
+      produces: parseList(req.body.produces),
+      supportedCategories: parseList(req.body.supportedCategories, parseList(req.body.produces)),
+      environmentTags: parseList(req.body.environmentTags),
+      spaceType: req.body.spaceType || "warehouse bay",
+      accessHours: req.body.accessHours || "business hours",
+      pricingUnit: req.body.pricingUnit || "monthly",
       ownerUid: req.user.uid,
       verified: true,
       isActive: true,
