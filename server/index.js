@@ -3,6 +3,7 @@ import dotenv from "dotenv";
 import express from "express";
 import authRoutes from "./routes/auth.js";
 import bookingRoutes from "./routes/bookings.js";
+import gradeRoutes from "./routes/grade.js";
 import receiptRoutes from "./routes/receipt.js";
 import warehouseRoutes from "./routes/warehouses.js";
 
@@ -21,6 +22,7 @@ app.get("/api/health", (_req, res) => {
 app.use("/api/auth", authRoutes);
 app.use("/api/warehouses", warehouseRoutes);
 app.use("/api/bookings", bookingRoutes);
+app.use("/api/grade", gradeRoutes);
 app.use("/api/receipt", receiptRoutes);
 
 app.listen(port, () => {

@@ -1,40 +1,34 @@
-﻿export default function GradeResult({ result }) {
-  if (!result) return null;
-
-  const grade = result.grade || "?";
-  const confidence = result.confidence
-    ? Math.round(result.confidence * 100)
-    : null;
-  const recommendation = result.recommendation || result.message || "";
-
-  const gradeClass =
-    grade === "A" ? "grade-A" : grade === "B" ? "grade-B" : "grade-C";
+export default function GradeResult({ result }) {
+  if (!result) {
+    return null;
+  }
 
   return (
-    <div className="card grade-result">
-      <div className={`grade-badge-circle ${gradeClass}`}>{grade}</div>
-      <div>
-        <p className="section-title" style={{ marginBottom: "4px" }}>
-          Grade {grade} Produce
-        </p>
-        {confidence !== null && (
-          <p className="grade-confidence-label" style={{ marginBottom: "12px" }}>
-            Confidence {confidence}%
-          </p>
-        )}
-        {confidence !== null && (
-          <div className="progress-bar" style={{ width: "140px", margin: "0 auto 12px" }}>
-            <div
-              className="progress-bar-fill"
-              style={{ width: `${confidence}%` }}
-            />
-          </div>
-        )}
-        {recommendation && (
-          <p style={{ fontSize: "0.88rem", color: "var(--clr-ink-muted)", maxWidth: "280px" }}>
-            {recommendation}
-          </p>
-        )}
+    <div className="grade-result-panel">
+      <div className="grade-result-top">
+        <div>
+          <p className="eyebrow">AI Result</p>
+          <h3 style={{ margin: 0 }}>Grade: {result.grade}</h3>
+        </div>
+        <div className="grade-score-chip">Score: {result.score}/100</div>
+      </div>
+      <div className="grade-grid">
+        <div className="grade-row">
+          <span>Standard</span>
+          <strong>{result.standard}</strong>
+        </div>
+        <div className="grade-row">
+          <span>Defects</span>
+          <strong>{result.defects}</strong>
+        </div>
+        <div className="grade-row">
+          <span>Moisture</span>
+          <strong>{result.moisture}</strong>
+        </div>
+        <div className="grade-row">
+          <span>Status</span>
+          <strong>{result.status} {result.bankAcceptable ? "OK" : "Review"}</strong>
+        </div>
       </div>
     </div>
   );

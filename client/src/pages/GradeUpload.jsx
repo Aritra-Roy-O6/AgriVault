@@ -1,14 +1,8 @@
-﻿import { useEffect, useRef, useState } from "react";
-import { useParams, Link } from "react-router-dom";
+import { useEffect, useRef, useState } from "react";
+import { Link, useParams } from "react-router-dom";
 import toast from "react-hot-toast";
-import { auth, apiBaseUrl } from "../firebase";
+import { apiBaseUrl, getAuthHeaders } from "../firebase";
 import GradeResult from "../components/GradeResult";
-
-async function getToken() {
-  const user = auth.currentUser;
-  if (!user) throw new Error("Not signed in.");
-  return user.getIdToken();
-}
 
 export default function GradeUpload() {
   const { bookingId } = useParams();
@@ -16,139 +10,215 @@ export default function GradeUpload() {
   const [preview, setPreview] = useState(null);
   const [file, setFile] = useState(null);
   const [loading, setLoading] = useState(false);
-  const [result, setResult] = useState(null);
   const [dragging, setDragging] = useState(false);
+  const [booking, setBooking] = useState(null);
+  const [result, setResult] = useState(null);
+  const [pageLoading, setPageLoading] = useState(true);
 
-  const handleFile = (f) => {
-    if (!f) return;
-    setFile(f);
-    const url = URL.createObjectURL(f);
-    setPreview(url);
-    setResult(null);
+  useEffect(() => {
+    return () => {
+      if (preview) {
+        URL.revokeObjectURL(preview);
+      }
+    };
+  }, [preview]);
+
+  useEffect(() => {
+    (async () => {
+      setPageLoading(true);
+      try {
+        const headers = await getAuthHeaders();
+        const response = await fetch(`${apiBaseUrl}/api/bookings/${bookingId}`, {
+          headers,
+        });
+        const data = await response.json();
+
+        if (!response.ok) {
+          throw new Error(data.message || "Unable to load booking.");
+        }
+
+        setBooking(data.booking);
+        if (data.booking.gradeResult) {
+          setResult(data.booking.gradeResult);
+        }
+      } catch (error) {
+        toast.error(error.message);
+      } finally {
+        setPageLoading(false);
+      }
+    })();
+  }, [bookingId]);
+
+  const handleFile = (nextFile) => {
+    if (!nextFile) {
+      return;
+    }
+
+    if (preview) {
+      URL.revokeObjectURL(preview);
+    }
+
+    setFile(nextFile);
+    setPreview(URL.createObjectURL(nextFile));
+    setResult((current) => current && current.gradedAt ? current : null);
   };
 
-  const handleDrop = (e) => {
-    e.preventDefault();
+  const handleDrop = (event) => {
+    event.preventDefault();
     setDragging(false);
-    const f = e.dataTransfer.files[0];
-    if (f) handleFile(f);
+    const nextFile = event.dataTransfer.files?.[0];
+    if (nextFile) {
+      handleFile(nextFile);
+    }
   };
 
-  const handleSubmit = async (e) => {
-    e.preventDefault();
-    if (!file) return toast.error("Please select an image first.");
+  const handleSubmit = async (event) => {
+    event.preventDefault();
+
+    if (!file) {
+      toast.error("Please select an image first.");
+      return;
+    }
+
     setLoading(true);
     try {
-      const token = await getToken();
+      const headers = await getAuthHeaders();
       const formData = new FormData();
       formData.append("image", file);
-      const res = await fetch(`${apiBaseUrl}/api/bookings/${bookingId}/grade`, {
+      formData.append("bookingId", bookingId);
+
+      const response = await fetch(`${apiBaseUrl}/api/grade`, {
         method: "POST",
-        headers: { Authorization: `Bearer ${token}` },
+        headers,
         body: formData,
       });
-      const data = await res.json();
-      if (!res.ok) throw new Error(data.message);
-      setResult(data.grade);
-      toast.success("Grading complete!");
-    } catch (err) {
-      toast.error(err.message);
+      const data = await response.json();
+
+      if (!response.ok) {
+        throw new Error(data.message || "Unable to grade produce.");
+      }
+
+      setResult(data.gradeResult);
+      toast.success("Grading complete.");
+    } catch (error) {
+      toast.error(error.message);
     } finally {
       setLoading(false);
     }
   };
 
+  if (pageLoading) {
+    return (
+      <main className="auth-center fade-up">
+        <div className="card auth-card">
+          <p className="eyebrow">Loading</p>
+          <h2>Preparing grade upload</h2>
+        </div>
+      </main>
+    );
+  }
+
+  if (!booking) {
+    return (
+      <main className="auth-center fade-up">
+        <div className="card auth-card">
+          <p className="eyebrow">AI Grading</p>
+          <h2>Booking not found</h2>
+        </div>
+      </main>
+    );
+  }
+
+  if (!["confirmed", "completed"].includes(booking.status)) {
+    return (
+      <main className="auth-center fade-up">
+        <div className="card auth-card">
+          <p className="eyebrow">AI Grading</p>
+          <h2>Only confirmed bookings can be graded</h2>
+          <p>Current booking status: {booking.status}</p>
+          <Link className="button" to="/farmer">
+            Back to Dashboard
+          </Link>
+        </div>
+      </main>
+    );
+  }
+
   return (
     <main className="page fade-up">
-      <div className="row-between" style={{ marginBottom:"8px" }}>
+      <div className="row-between" style={{ marginBottom: "8px" }}>
         <div>
           <p className="eyebrow">AI Grading</p>
-          <h2 style={{ margin:0 }}>Grade Your Produce</h2>
+          <h2 style={{ margin: 0 }}>Analyze Produce</h2>
         </div>
-        <Link className="button-ghost" to="/farmer">&#8592; Back</Link>
+        <Link className="button-ghost" to="/farmer">
+          Back
+        </Link>
       </div>
 
       <section className="page two-column">
         <div className="card">
-          <h3 style={{ marginBottom:"1rem" }}>Upload Produce Image</h3>
+          <h3 style={{ marginBottom: "1rem" }}>Upload Produce Image</h3>
           <form className="form-grid" onSubmit={handleSubmit}>
             <div
               className={`upload-zone${dragging ? " dragging" : ""}`}
               onClick={() => fileRef.current?.click()}
-              onDragOver={(e) => { e.preventDefault(); setDragging(true); }}
               onDragLeave={() => setDragging(false)}
+              onDragOver={(event) => {
+                event.preventDefault();
+                setDragging(true);
+              }}
               onDrop={handleDrop}
             >
               {preview ? (
-                <img
-                  src={preview}
-                  alt="Produce preview"
-                  style={{ width:"100%", maxHeight:"220px", objectFit:"cover", borderRadius:"12px" }}
-                />
+                <img alt="Produce preview" src={preview} style={{ width: "100%", maxHeight: "220px", objectFit: "cover", borderRadius: "12px" }} />
               ) : (
                 <>
-                  <span className="upload-zone-icon">&#128247;</span>
-                  <p style={{ fontWeight:700, color:"var(--clr-ink)", margin:0 }}>
-                    Drop image here or click to browse
-                  </p>
-                  <p style={{ fontSize:"0.8rem", color:"var(--clr-ink-muted)", margin:0 }}>
-                    Supports JPG, PNG, WEBP
-                  </p>
+                  <span className="upload-zone-icon">Upload</span>
+                  <p style={{ fontWeight: 700, margin: 0 }}>Drop image here or click to browse</p>
+                  <p style={{ fontSize: "0.8rem", margin: 0 }}>JPG, PNG, WEBP</p>
                 </>
               )}
               <input
-                ref={fileRef}
-                type="file"
                 accept="image/*"
-                style={{ display:"none" }}
-                onChange={(e) => handleFile(e.target.files[0])}
+                onChange={(event) => handleFile(event.target.files?.[0])}
+                ref={fileRef}
+                style={{ display: "none" }}
+                type="file"
               />
             </div>
-            {file && (
-              <p style={{ fontSize:"0.8rem", color:"var(--clr-ink-muted)", margin:0 }}>
-                &#128196; {file.name}
-              </p>
-            )}
-            <button
-              className="button button-full"
-              disabled={loading || !file}
-              type="submit"
-              style={{ marginTop:"4px" }}
-            >
+            {file ? <p style={{ fontSize: "0.8rem", margin: 0 }}>File: {file.name}</p> : null}
+            <button className="button button-full" disabled={loading || !file} type="submit">
               {loading ? (
-                <><span className="spinner" /> Analyzing...</>
+                <>
+                  <span className="spinner" /> Analyzing Produce...
+                </>
               ) : (
-                "&#129302; Grade Produce"
+                "Analyze Produce"
               )}
             </button>
           </form>
         </div>
 
-        <div style={{ display:"grid", gap:"16px", alignContent:"start" }}>
+        <div style={{ display: "grid", gap: "16px", alignContent: "start" }}>
           {result ? (
             <div className="card">
               <GradeResult result={result} />
+              <div className="actions" style={{ marginTop: "16px" }}>
+                <Link className="button" to={`/receipt/${bookingId}`}>
+                  Download Receipt
+                </Link>
+              </div>
             </div>
           ) : (
             <div className="card">
               <div className="empty-state">
-                <span className="empty-state-icon">&#129302;</span>
+                <span className="empty-state-icon">AI</span>
                 <p className="empty-state-title">AI Grade Result</p>
-                <p className="empty-state-sub">
-                  Upload a produce image and submit to get an instant AI-powered quality grade.
-                </p>
+                <p className="empty-state-sub">Upload a produce image to get grade, BIS reference, and bank eligibility status.</p>
               </div>
             </div>
           )}
-          <div className="card">
-            <p className="eyebrow">How it works</p>
-            <ul className="simple-list">
-              <li>Upload a clear photo of your produce</li>
-              <li>Our AI analyzes color, texture and quality</li>
-              <li>You receive a Grade A, B, or C rating</li>
-              <li>Better grades unlock higher loan eligibility</li>
-            </ul>
-          </div>
         </div>
       </section>
     </main>

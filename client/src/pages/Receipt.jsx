@@ -1,13 +1,7 @@
 import { useEffect, useState } from "react";
-import { useParams, Link } from "react-router-dom";
+import { Link, useParams } from "react-router-dom";
 import toast from "react-hot-toast";
-import { auth, apiBaseUrl } from "../firebase";
-
-async function getToken() {
-  const user = auth.currentUser;
-  if (!user) throw new Error("Not signed in.");
-  return user.getIdToken();
-}
+import { apiBaseUrl, getAuthHeaders } from "../firebase";
 
 export default function Receipt() {
   const { bookingId } = useParams();
@@ -16,14 +10,15 @@ export default function Receipt() {
 
   useEffect(() => {
     (async () => {
+      setLoading(true);
       try {
-        const token = await getToken();
-        const res = await fetch(`${apiBaseUrl}/api/bookings/${bookingId}/receipt`, {
-          headers: { Authorization: `Bearer ${token}` },
+        const headers = await getAuthHeaders();
+        const res = await fetch(`${apiBaseUrl}/api/bookings/${bookingId}`, {
+          headers,
         });
         const data = await res.json();
-        if (!res.ok) throw new Error(data.message);
-        setBooking(data.booking || data);
+        if (!res.ok) throw new Error(data.message || "Unable to load receipt.");
+        setBooking(data.booking);
       } catch (err) {
         toast.error(err.message);
       } finally {
@@ -34,17 +29,17 @@ export default function Receipt() {
 
   const handleDownload = async () => {
     try {
-      const token = await getToken();
+      const headers = await getAuthHeaders();
       const res = await fetch(`${apiBaseUrl}/api/receipt/${bookingId}`, {
-        headers: { Authorization: `Bearer ${token}` },
+        headers,
       });
       if (!res.ok) throw new Error("Could not download receipt.");
       const blob = await res.blob();
       const url = URL.createObjectURL(blob);
-      const a = document.createElement("a");
-      a.href = url;
-      a.download = `receipt-${bookingId}.pdf`;
-      a.click();
+      const anchor = document.createElement("a");
+      anchor.href = url;
+      anchor.download = `receipt-${bookingId}.pdf`;
+      anchor.click();
       URL.revokeObjectURL(url);
     } catch (err) {
       toast.error(err.message);
@@ -54,12 +49,9 @@ export default function Receipt() {
   if (loading) {
     return (
       <main className="auth-center fade-up">
-        <div className="card" style={{ maxWidth:"520px", width:"100%" }}>
-          <div className="skeleton" style={{ height:"20px", width:"120px", marginBottom:"16px" }} />
-          <div className="skeleton" style={{ height:"32px", marginBottom:"24px" }} />
-          <div className="skeleton" style={{ height:"14px", marginBottom:"8px" }} />
-          <div className="skeleton" style={{ height:"14px", marginBottom:"8px" }} />
-          <div className="skeleton" style={{ height:"14px", width:"60%" }} />
+        <div className="card auth-card">
+          <p className="eyebrow">Receipt</p>
+          <h2>Loading receipt</h2>
         </div>
       </main>
     );
@@ -68,101 +60,48 @@ export default function Receipt() {
   if (!booking) {
     return (
       <main className="auth-center fade-up">
-        <div className="card" style={{ maxWidth:"520px", textAlign:"center" }}>
-          <span style={{ fontSize:"2.5rem" }}>&#128196;</span>
-          <p className="section-title" style={{ marginTop:"12px" }}>Receipt Not Found</p>
-          <p style={{ color:"var(--clr-ink-muted)", marginBottom:"1.5rem" }}>
-            This booking receipt could not be loaded.
-          </p>
-          <Link className="button" to="/farmer">Back to Dashboard</Link>
+        <div className="card auth-card">
+          <p className="eyebrow">Receipt</p>
+          <h2>Receipt not found</h2>
+          <Link className="button" to="/farmer">
+            Back to Dashboard
+          </Link>
         </div>
       </main>
     );
   }
 
-  const total =
-    booking.totalCost ||
-    (booking.sqft && booking.months ? booking.sqft * 12 * booking.months : null);
-
   return (
     <main className="auth-center fade-up">
-      <div className="card" style={{ maxWidth:"520px", width:"100%" }}>
-        {/* Receipt Header */}
-        <div className="row-between" style={{ marginBottom:"var(--space-md)" }}>
+      <div className="card" style={{ maxWidth: "560px", width: "100%" }}>
+        <div className="row-between" style={{ marginBottom: "16px" }}>
           <div>
             <p className="eyebrow">Booking Receipt</p>
-            <h2 style={{ margin:0, fontSize:"1.3rem" }}>AgriVault Storage</h2>
+            <h2 style={{ margin: 0 }}>AgriVault Quality Summary</h2>
           </div>
-          <span className={`badge status-${booking.status || "pending"}`}>
-            {booking.status || "pending"}
-          </span>
+          <span className={`badge status-${booking.status || "pending"}`}>{booking.status || "pending"}</span>
         </div>
 
-        <div className="receipt-divider" />
-
-        {/* Details */}
         <div className="receipt-meta">
-          {booking.farmerName && (
-            <div className="receipt-row">
-              <span style={{ color:"var(--clr-ink-muted)" }}>Farmer</span>
-              <span style={{ fontWeight:600 }}>{booking.farmerName}</span>
-            </div>
-          )}
-          {booking.warehouseName && (
-            <div className="receipt-row">
-              <span style={{ color:"var(--clr-ink-muted)" }}>Warehouse</span>
-              <span style={{ fontWeight:600 }}>{booking.warehouseName}</span>
-            </div>
-          )}
-          {booking.produce && (
-            <div className="receipt-row">
-              <span style={{ color:"var(--clr-ink-muted)" }}>Produce</span>
-              <span style={{ fontWeight:600, textTransform:"capitalize" }}>{booking.produce}</span>
-            </div>
-          )}
-          {booking.weight && (
-            <div className="receipt-row">
-              <span style={{ color:"var(--clr-ink-muted)" }}>Quantity</span>
-              <span style={{ fontWeight:600 }}>{booking.weight} tonnes</span>
-            </div>
-          )}
-          {booking.createdAt && (
-            <div className="receipt-row">
-              <span style={{ color:"var(--clr-ink-muted)" }}>Date</span>
-              <span style={{ fontWeight:600 }}>{new Date(booking.createdAt).toLocaleDateString("en-IN")}</span>
-            </div>
-          )}
-          {booking.duration && (
-            <div className="receipt-row">
-              <span style={{ color:"var(--clr-ink-muted)" }}>Duration</span>
-              <span style={{ fontWeight:600 }}>{booking.duration} month{booking.duration > 1 ? "s" : ""}</span>
-            </div>
-          )}
-          {booking.sqft && (
-            <div className="receipt-row">
-              <span style={{ color:"var(--clr-ink-muted)" }}>Space Used</span>
-              <span style={{ fontWeight:600 }}>{booking.sqft} sq ft</span>
-            </div>
-          )}
-          {total != null && (
-            <div className="receipt-row total">
-              <span>Total Cost</span>
-              <span>&#8377;{Number(total).toLocaleString("en-IN")}</span>
-            </div>
-          )}
+          <div className="receipt-row"><span>Farmer</span><strong>{booking.farmerName || "N/A"}</strong></div>
+          <div className="receipt-row"><span>Warehouse</span><strong>{booking.warehouseName || "N/A"}</strong></div>
+          <div className="receipt-row"><span>Produce</span><strong>{booking.produce || "N/A"}</strong></div>
+          <div className="receipt-row"><span>Quantity</span><strong>{booking.weight || 0} quintals</strong></div>
+          <div className="receipt-row"><span>Storage Period</span><strong>{booking.duration || 0} weeks</strong></div>
+          <div className="receipt-row"><span>Total Cost</span><strong>Rs {Number(booking.totalPrice || 0).toLocaleString("en-IN")}</strong></div>
+          <div className="receipt-row"><span>Loan Eligibility</span><strong>Rs {Number(booking.loanEligibility || 0).toLocaleString("en-IN")}</strong></div>
+          {booking.gradeResult ? (
+            <>
+              <div className="receipt-row"><span>Grade</span><strong>{booking.gradeResult.grade}</strong></div>
+              <div className="receipt-row"><span>Score</span><strong>{booking.gradeResult.score}/100</strong></div>
+              <div className="receipt-row"><span>BIS Standard</span><strong>{booking.gradeResult.standard}</strong></div>
+            </>
+          ) : null}
         </div>
 
-        <div className="receipt-divider" />
-
-        {/* Booking ID */}
-        <p style={{ fontSize:"0.75rem", color:"var(--clr-ink-faint)", marginBottom:"var(--space-md)" }}>
-          Booking ID: {bookingId}
-        </p>
-
-        {/* Actions */}
         <div className="actions">
           <button className="button" onClick={handleDownload} type="button">
-            &#8595; Download PDF
+            Download PDF
           </button>
           <Link className="button-secondary" to="/farmer">
             Back to Dashboard

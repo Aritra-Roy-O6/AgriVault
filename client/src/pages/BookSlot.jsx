@@ -1,6 +1,7 @@
-import { useEffect, useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import { Link, useNavigate, useSearchParams } from "react-router-dom";
 import toast from "react-hot-toast";
+import GradeResult from "../components/GradeResult";
 import { apiBaseUrl, getAuthHeaders } from "../firebase";
 
 const SQFT_PER_TONNE = 20;
@@ -18,6 +19,7 @@ const PRODUCE_RATES = {
 
 export default function BookSlot({ loading: sessionLoading, user }) {
   const navigate = useNavigate();
+  const fileRef = useRef(null);
   const [searchParams] = useSearchParams();
   const warehouseIdParam = searchParams.get("warehouseId") || "";
 
@@ -31,6 +33,11 @@ export default function BookSlot({ loading: sessionLoading, user }) {
   });
   const [loading, setLoading] = useState(false);
   const [booking, setBooking] = useState(null);
+  const [file, setFile] = useState(null);
+  const [preview, setPreview] = useState(null);
+  const [dragging, setDragging] = useState(false);
+  const [grading, setGrading] = useState(false);
+  const [gradeResult, setGradeResult] = useState(null);
 
   useEffect(() => {
     (async () => {
@@ -49,8 +56,38 @@ export default function BookSlot({ loading: sessionLoading, user }) {
     setForm((current) => ({ ...current, warehouseId: warehouseIdParam }));
   }, [warehouseIdParam]);
 
+  useEffect(() => {
+    return () => {
+      if (preview) {
+        URL.revokeObjectURL(preview);
+      }
+    };
+  }, [preview]);
+
   const updateForm = (e) =>
     setForm((c) => ({ ...c, [e.target.name]: e.target.value }));
+
+  const handleFile = (nextFile) => {
+    if (!nextFile) {
+      return;
+    }
+
+    if (preview) {
+      URL.revokeObjectURL(preview);
+    }
+
+    setFile(nextFile);
+    setPreview(URL.createObjectURL(nextFile));
+  };
+
+  const handleDrop = (event) => {
+    event.preventDefault();
+    setDragging(false);
+    const nextFile = event.dataTransfer.files?.[0];
+    if (nextFile) {
+      handleFile(nextFile);
+    }
+  };
 
   const qty = parseFloat(form.quantity) || 0;
   const months = parseInt(form.months, 10) || 1;
@@ -93,6 +130,7 @@ export default function BookSlot({ loading: sessionLoading, user }) {
       const data = await res.json();
       if (!res.ok) throw new Error(data.message || "Unable to create booking.");
       setBooking(data.booking);
+      setGradeResult(data.booking.gradeResult || null);
       toast.success("Booking submitted!");
     } catch (err) {
       toast.error(err.message);
@@ -101,28 +139,59 @@ export default function BookSlot({ loading: sessionLoading, user }) {
     }
   };
 
-  if (booking) {
-    return (
-      <main className="auth-center fade-up">
-        <div className="card" style={{ maxWidth: "480px", textAlign: "center" }}>
-          <div style={{ fontSize: "3rem", marginBottom: "12px" }}>Done</div>
-          <p className="eyebrow">Booking Submitted</p>
-          <h2 style={{ marginBottom: "8px" }}>You are all set!</h2>
-          <p style={{ marginBottom: "1.5rem" }}>
-            Your booking is pending owner confirmation. You will be notified once it is approved.
-          </p>
-          <div className="actions" style={{ justifyContent: "center" }}>
-            <button className="button" onClick={() => navigate("/farmer")} type="button">
-              Back to Dashboard
-            </button>
-            <Link className="button-secondary" to={`/receipt/${booking.id}`}>
-              View Receipt
-            </Link>
-          </div>
-        </div>
-      </main>
-    );
-  }
+  const refreshBooking = async () => {
+    if (!booking?.id) {
+      return;
+    }
+
+    try {
+      const headers = await getAuthHeaders();
+      const res = await fetch(`${apiBaseUrl}/api/bookings/${booking.id}`, {
+        headers,
+      });
+      const data = await res.json();
+      if (!res.ok) throw new Error(data.message || "Unable to refresh booking.");
+      setBooking(data.booking);
+      setGradeResult(data.booking.gradeResult || null);
+      toast.success(`Booking status: ${data.booking.status}`);
+    } catch (err) {
+      toast.error(err.message);
+    }
+  };
+
+  const handleGrade = async () => {
+    if (!booking?.id) {
+      toast.error("Submit the booking first.");
+      return;
+    }
+
+    if (!file) {
+      toast.error("Upload a crop image first.");
+      return;
+    }
+
+    setGrading(true);
+    try {
+      const headers = await getAuthHeaders();
+      const formData = new FormData();
+      formData.append("image", file);
+      formData.append("bookingId", booking.id);
+
+      const res = await fetch(`${apiBaseUrl}/api/grade`, {
+        method: "POST",
+        headers,
+        body: formData,
+      });
+      const data = await res.json();
+      if (!res.ok) throw new Error(data.message || "Unable to grade produce.");
+      setGradeResult(data.gradeResult);
+      toast.success("Produce graded successfully.");
+    } catch (err) {
+      toast.error(err.message);
+    } finally {
+      setGrading(false);
+    }
+  };
 
   return (
     <main className="page fade-up">
@@ -189,6 +258,31 @@ export default function BookSlot({ loading: sessionLoading, user }) {
         </div>
 
         <div style={{ display: "grid", gap: "16px", alignContent: "start" }}>
+          {booking ? (
+            <div className="card">
+              <p className="eyebrow">Booking Created</p>
+              <h3 style={{ marginBottom: "12px" }}>Booking saved on this page</h3>
+              <div className="receipt-meta">
+                <div className="receipt-row">
+                  <span>Status</span>
+                  <strong>{booking.status}</strong>
+                </div>
+                <div className="receipt-row">
+                  <span>Booking ID</span>
+                  <strong>{booking.id}</strong>
+                </div>
+              </div>
+              <div className="actions">
+                <button className="button-secondary" onClick={refreshBooking} type="button">
+                  Refresh Status
+                </button>
+                <Link className="button-ghost" to={`/receipt/${booking.id}`}>
+                  View Receipt
+                </Link>
+              </div>
+            </div>
+          ) : null}
+
           <div className="card calculator-card">
             <p className="eyebrow">Cost Estimate</p>
             <h3 style={{ marginBottom: "1rem" }}>Live Breakdown</h3>
@@ -229,6 +323,56 @@ export default function BookSlot({ loading: sessionLoading, user }) {
               {loanEligible ? <span className="badge status-confirmed">Loan Eligible</span> : <span className="badge badge-muted">Below loan threshold</span>}
             </div>
           </div>
+
+          <div className="card">
+            <p className="eyebrow">Crop Image</p>
+            <h3 style={{ marginBottom: "1rem" }}>Upload and grade on this page</h3>
+            <div
+              className={`upload-zone${dragging ? " dragging" : ""}`}
+              onClick={() => fileRef.current?.click()}
+              onDragLeave={() => setDragging(false)}
+              onDragOver={(event) => {
+                event.preventDefault();
+                setDragging(true);
+              }}
+              onDrop={handleDrop}
+            >
+              {preview ? (
+                <img alt="Crop preview" src={preview} style={{ width: "100%", maxHeight: "220px", objectFit: "cover", borderRadius: "12px" }} />
+              ) : (
+                <>
+                  <span className="upload-zone-icon">Upload</span>
+                  <p style={{ fontWeight: 700, margin: 0 }}>Drop image here or click to browse</p>
+                  <p style={{ fontSize: "0.8rem", margin: 0 }}>JPG, PNG, WEBP</p>
+                </>
+              )}
+              <input accept="image/*" onChange={(event) => handleFile(event.target.files?.[0])} ref={fileRef} style={{ display: "none" }} type="file" />
+            </div>
+            {file ? <p style={{ fontSize: "0.8rem", marginTop: "12px" }}>File: {file.name}</p> : null}
+            <p style={{ fontSize: "0.82rem", marginTop: "12px" }}>
+              You can analyze the crop image right after booking from this same page.
+            </p>
+            <button
+              className="button button-full"
+              disabled={grading || !booking?.id || !file}
+              onClick={handleGrade}
+              style={{ marginTop: "8px" }}
+              type="button"
+            >
+              {grading ? "Analyzing Produce..." : "Analyze Produce"}
+            </button>
+          </div>
+
+          {gradeResult ? (
+            <div className="card">
+              <GradeResult result={gradeResult} />
+              <div className="actions" style={{ marginTop: "16px" }}>
+                <Link className="button" to={`/receipt/${booking?.id}`}>
+                  Download Receipt
+                </Link>
+              </div>
+            </div>
+          ) : null}
         </div>
       </section>
     </main>

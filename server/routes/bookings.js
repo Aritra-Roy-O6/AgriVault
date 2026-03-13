@@ -6,6 +6,15 @@ import verifyToken from "../middleware/verifyToken.js";
 const router = express.Router();
 const upload = multer({ storage: multer.memoryStorage() });
 
+function getWarehouseRefs(warehouse) {
+  const totalSqft = Number(warehouse.sqft || warehouse.totalSqft || 0);
+  const availableSqft = Number(
+    warehouse.availableSqft ?? warehouse.sqft ?? warehouse.totalSqft ?? 0
+  );
+
+  return { totalSqft, availableSqft };
+}
+
 router.get("/farmer/:uid", verifyToken, async (req, res) => {
   try {
     if (req.user.uid !== req.params.uid) {
@@ -78,42 +87,68 @@ router.get("/:id", verifyToken, async (req, res) => {
 
 router.post("/", verifyToken, async (req, res) => {
   try {
-    const warehouseDoc = await db.collection("warehouses").doc(req.body.warehouseId).get();
+    const warehouseRef = db.collection("warehouses").doc(req.body.warehouseId);
+    const requestedSqft = Number(req.body.sqft);
 
-    if (!warehouseDoc.exists) {
-      return res.status(404).json({ message: "Warehouse not found." });
+    if (!requestedSqft || requestedSqft <= 0) {
+      return res.status(400).json({ message: "Requested square footage must be greater than zero." });
     }
 
-    const warehouse = warehouseDoc.data();
-    const payload = {
-      farmerId: req.user.uid,
-      ownerId: warehouse.ownerUid || "",
-      warehouseId: req.body.warehouseId,
-      warehouseName: warehouse.name,
-      farmerName: req.body.farmerName,
-      phone: req.body.phone,
-      produce: req.body.produce,
-      weight: Number(req.body.weight),
-      sqft: Number(req.body.sqft),
-      duration: Number(req.body.duration),
-      totalPrice: Number(req.body.totalPrice),
-      pricePerSqft: Number(warehouse.pricePerSqft),
-      loanEligibility: Number(req.body.loanEligibility || 0),
-      estimatedProduceValue: Number(req.body.estimatedProduceValue || 0),
-      status: "pending",
-      createdAt: new Date().toISOString(),
-    };
+    const booking = await db.runTransaction(async (transaction) => {
+      const warehouseDoc = await transaction.get(warehouseRef);
 
-    const docRef = await db.collection("bookings").add(payload);
+      if (!warehouseDoc.exists) {
+        throw new Error("Warehouse not found.");
+      }
 
-    return res.status(201).json({
-      booking: {
-        id: docRef.id,
+      const warehouse = warehouseDoc.data();
+      const { availableSqft } = getWarehouseRefs(warehouse);
+
+      if (availableSqft < requestedSqft) {
+        throw new Error("Not enough space available in this godown.");
+      }
+
+      const payload = {
+        farmerId: req.user.uid,
+        ownerId: warehouse.ownerUid || "",
+        warehouseId: req.body.warehouseId,
+        warehouseName: warehouse.name,
+        farmerName: req.body.farmerName,
+        phone: req.body.phone,
+        produce: req.body.produce,
+        weight: Number(req.body.weight),
+        sqft: requestedSqft,
+        duration: Number(req.body.duration),
+        totalPrice: Number(req.body.totalPrice),
+        pricePerSqft: Number(warehouse.pricePerSqft),
+        loanEligibility: Number(req.body.loanEligibility || 0),
+        estimatedProduceValue: Number(req.body.estimatedProduceValue || 0),
+        status: "pending",
+        spaceReserved: true,
+        createdAt: new Date().toISOString(),
+      };
+
+      const bookingRef = db.collection("bookings").doc();
+      transaction.set(bookingRef, payload);
+      transaction.set(
+        warehouseRef,
+        {
+          availableSqft: availableSqft - requestedSqft,
+          updatedAt: new Date().toISOString(),
+        },
+        { merge: true }
+      );
+
+      return {
+        id: bookingRef.id,
         ...payload,
-      },
+      };
     });
+
+    return res.status(201).json({ booking });
   } catch (error) {
-    return res.status(500).json({ message: error.message });
+    const statusCode = error.message === "Warehouse not found." ? 404 : 400;
+    return res.status(statusCode).json({ message: error.message });
   }
 });
 
@@ -125,34 +160,83 @@ router.patch("/:id/status", verifyToken, async (req, res) => {
     }
 
     const bookingRef = db.collection("bookings").doc(req.params.id);
-    const bookingDoc = await bookingRef.get();
+    const updatedBooking = await db.runTransaction(async (transaction) => {
+      const bookingDoc = await transaction.get(bookingRef);
 
-    if (!bookingDoc.exists) {
-      return res.status(404).json({ message: "Booking not found." });
-    }
+      if (!bookingDoc.exists) {
+        throw new Error("Booking not found.");
+      }
 
-    const booking = bookingDoc.data();
-    if (booking.ownerId !== req.user.uid) {
-      return res.status(403).json({ message: "Not allowed to update this booking." });
-    }
+      const booking = bookingDoc.data();
+      if (booking.ownerId !== req.user.uid) {
+        throw new Error("Not allowed to update this booking.");
+      }
 
-    await bookingRef.set(
-      {
-        status: nextStatus,
-        updatedAt: new Date().toISOString(),
-      },
-      { merge: true }
-    );
+      const warehouseRef = db.collection("warehouses").doc(booking.warehouseId);
+      const warehouseDoc = await transaction.get(warehouseRef);
+      if (!warehouseDoc.exists) {
+        throw new Error("Warehouse not found.");
+      }
 
-    return res.json({
-      booking: {
+      const warehouse = warehouseDoc.data();
+      const { totalSqft, availableSqft } = getWarehouseRefs(warehouse);
+      const reservedSqft = Number(booking.sqft || 0);
+      const currentlyReserved = booking.spaceReserved !== false;
+      let nextReserved = currentlyReserved;
+      let nextAvailableSqft = availableSqft;
+
+      if (nextStatus === "rejected" && currentlyReserved) {
+        nextAvailableSqft = Math.min(totalSqft, availableSqft + reservedSqft);
+        nextReserved = false;
+      }
+
+      if (["pending", "confirmed", "completed"].includes(nextStatus) && !currentlyReserved) {
+        if (availableSqft < reservedSqft) {
+          throw new Error("Not enough space available to re-activate this booking.");
+        }
+        nextAvailableSqft = availableSqft - reservedSqft;
+        nextReserved = true;
+      }
+
+      transaction.set(
+        bookingRef,
+        {
+          status: nextStatus,
+          spaceReserved: nextReserved,
+          updatedAt: new Date().toISOString(),
+        },
+        { merge: true }
+      );
+
+      if (nextAvailableSqft !== availableSqft) {
+        transaction.set(
+          warehouseRef,
+          {
+            availableSqft: nextAvailableSqft,
+            updatedAt: new Date().toISOString(),
+          },
+          { merge: true }
+        );
+      }
+
+      return {
         id: bookingDoc.id,
         ...booking,
         status: nextStatus,
-      },
+        spaceReserved: nextReserved,
+      };
     });
+
+    return res.json({ booking: updatedBooking });
   } catch (error) {
-    return res.status(500).json({ message: error.message });
+    let statusCode = 400;
+    if (error.message === "Booking not found." || error.message === "Warehouse not found.") {
+      statusCode = 404;
+    }
+    if (error.message === "Not allowed to update this booking.") {
+      statusCode = 403;
+    }
+    return res.status(statusCode).json({ message: error.message });
   }
 });
 
