@@ -1,17 +1,11 @@
-﻿import { useEffect, useState } from "react";
-import { useNavigate, useSearchParams, Link } from "react-router-dom";
+import { useEffect, useState } from "react";
+import { Link, useNavigate, useSearchParams } from "react-router-dom";
 import toast from "react-hot-toast";
-import { auth, apiBaseUrl } from "../firebase";
-
-async function getToken() {
-  const user = auth.currentUser;
-  if (!user) throw new Error("Not signed in.");
-  return user.getIdToken();
-}
+import { apiBaseUrl, getAuthHeaders } from "../firebase";
 
 const SQFT_PER_TONNE = 20;
 const RATE_PER_SQFT_PER_MONTH = 12;
-const LOAN_ELIGIBILITY_RATE = 0.70;
+const LOAN_ELIGIBILITY_RATE = 0.7;
 
 const PRODUCE_RATES = {
   wheat: 2800,
@@ -22,7 +16,7 @@ const PRODUCE_RATES = {
   other: 2500,
 };
 
-export default function BookSlot() {
+export default function BookSlot({ loading: sessionLoading, user }) {
   const navigate = useNavigate();
   const [searchParams] = useSearchParams();
   const warehouseIdParam = searchParams.get("warehouseId") || "";
@@ -41,12 +35,9 @@ export default function BookSlot() {
   useEffect(() => {
     (async () => {
       try {
-        const token = await getToken();
-        const res = await fetch(`${apiBaseUrl}/api/warehouses`, {
-          headers: { Authorization: `Bearer ${token}` },
-        });
+        const res = await fetch(`${apiBaseUrl}/api/warehouses`);
         const data = await res.json();
-        if (!res.ok) throw new Error(data.message);
+        if (!res.ok) throw new Error(data.message || "Unable to load warehouses.");
         setWarehouses(data.warehouses || []);
       } catch (err) {
         toast.error(err.message);
@@ -54,11 +45,15 @@ export default function BookSlot() {
     })();
   }, []);
 
+  useEffect(() => {
+    setForm((current) => ({ ...current, warehouseId: warehouseIdParam }));
+  }, [warehouseIdParam]);
+
   const updateForm = (e) =>
     setForm((c) => ({ ...c, [e.target.name]: e.target.value }));
 
   const qty = parseFloat(form.quantity) || 0;
-  const months = parseInt(form.months) || 1;
+  const months = parseInt(form.months, 10) || 1;
   const sqft = qty * SQFT_PER_TONNE;
   const storageCost = sqft * RATE_PER_SQFT_PER_MONTH * months;
   const produceRate = PRODUCE_RATES[form.produce] || 2500;
@@ -68,25 +63,35 @@ export default function BookSlot() {
 
   const handleSubmit = async (e) => {
     e.preventDefault();
+    if (sessionLoading || !user) {
+      toast.error("Please sign in first.");
+      return;
+    }
+
     setLoading(true);
     try {
-      const token = await getToken();
+      const headers = await getAuthHeaders();
       const res = await fetch(`${apiBaseUrl}/api/bookings`, {
         method: "POST",
         headers: {
           "Content-Type": "application/json",
-          Authorization: `Bearer ${token}`,
+          ...headers,
         },
         body: JSON.stringify({
           warehouseId: form.warehouseId,
+          farmerName: user.displayName || user.email?.split("@")[0] || "Farmer",
+          phone: "Not provided",
           produce: form.produce,
-          quantity: qty,
-          months,
-          startDate: form.startDate,
+          weight: qty,
+          sqft,
+          duration: months,
+          totalPrice: storageCost,
+          loanEligibility,
+          estimatedProduceValue: produceValue,
         }),
       });
       const data = await res.json();
-      if (!res.ok) throw new Error(data.message);
+      if (!res.ok) throw new Error(data.message || "Unable to create booking.");
       setBooking(data.booking);
       toast.success("Booking submitted!");
     } catch (err) {
@@ -100,10 +105,10 @@ export default function BookSlot() {
     return (
       <main className="auth-center fade-up">
         <div className="card" style={{ maxWidth: "480px", textAlign: "center" }}>
-          <div style={{ fontSize: "3rem", marginBottom: "12px" }}>&#10003;</div>
+          <div style={{ fontSize: "3rem", marginBottom: "12px" }}>Done</div>
           <p className="eyebrow">Booking Submitted</p>
           <h2 style={{ marginBottom: "8px" }}>You are all set!</h2>
-          <p style={{ color: "var(--clr-ink-muted)", marginBottom: "1.5rem" }}>
+          <p style={{ marginBottom: "1.5rem" }}>
             Your booking is pending owner confirmation. You will be notified once it is approved.
           </p>
           <div className="actions" style={{ justifyContent: "center" }}>
@@ -126,11 +131,12 @@ export default function BookSlot() {
           <p className="eyebrow">New Booking</p>
           <h2 style={{ margin: 0 }}>Book a Storage Slot</h2>
         </div>
-        <Link className="button-ghost" to="/farmer">&#8592; Back</Link>
+        <Link className="button-ghost" to="/farmer">
+          Back
+        </Link>
       </div>
 
       <section className="page two-column">
-        {/* Form */}
         <div className="card">
           <h3 style={{ marginBottom: "1.25rem" }}>Booking Details</h3>
           <form className="form-grid" onSubmit={handleSubmit}>
@@ -148,75 +154,51 @@ export default function BookSlot() {
             <label>
               Produce Type
               <select name="produce" onChange={updateForm} value={form.produce}>
-                <option value="wheat">&#127807; Wheat</option>
-                <option value="rice">&#127807; Rice</option>
-                <option value="pulses">&#127807; Pulses</option>
-                <option value="vegetables">&#129382; Vegetables</option>
-                <option value="fruits">&#127820; Fruits</option>
-                <option value="other">&#128179; Other</option>
+                <option value="wheat">Wheat</option>
+                <option value="rice">Rice</option>
+                <option value="pulses">Pulses</option>
+                <option value="vegetables">Vegetables</option>
+                <option value="fruits">Fruits</option>
+                <option value="other">Other</option>
               </select>
             </label>
             <div className="form-row">
               <label>
                 Quantity (tonnes)
-                <input
-                  name="quantity"
-                  onChange={updateForm}
-                  placeholder="e.g. 10"
-                  required
-                  type="number"
-                  min="0.1"
-                  step="0.1"
-                  value={form.quantity}
-                />
+                <input name="quantity" min="0.1" onChange={updateForm} placeholder="e.g. 10" required step="0.1" type="number" value={form.quantity} />
               </label>
               <label>
                 Duration (months)
                 <select name="months" onChange={updateForm} value={form.months}>
-                  {[1,2,3,6,12].map((m) => (
-                    <option key={m} value={m}>{m} month{m > 1 ? "s" : ""}</option>
+                  {[1, 2, 3, 6, 12].map((m) => (
+                    <option key={m} value={m}>
+                      {m} month{m > 1 ? "s" : ""}
+                    </option>
                   ))}
                 </select>
               </label>
             </div>
             <label>
               Start Date
-              <input
-                name="startDate"
-                onChange={updateForm}
-                required
-                type="date"
-                value={form.startDate}
-              />
+              <input name="startDate" onChange={updateForm} required type="date" value={form.startDate} />
             </label>
-            <button
-              className="button button-full"
-              disabled={loading || !form.warehouseId}
-              type="submit"
-              style={{ marginTop: "4px" }}
-            >
-              {loading ? (
-                <><span className="spinner" /> Submitting...</>
-              ) : (
-                "Submit Booking"
-              )}
+            <button className="button button-full" disabled={loading || !form.warehouseId} type="submit" style={{ marginTop: "4px" }}>
+              {loading ? "Submitting..." : "Submit Booking"}
             </button>
           </form>
         </div>
 
-        {/* Cost calculator */}
         <div style={{ display: "grid", gap: "16px", alignContent: "start" }}>
           <div className="card calculator-card">
             <p className="eyebrow">Cost Estimate</p>
             <h3 style={{ marginBottom: "1rem" }}>Live Breakdown</h3>
-
             <div className="cost-row">
               <span className="cost-row-label">Space Required</span>
               <span className="cost-row-value">{sqft.toFixed(0)} sq ft</span>
             </div>
             <div className="cost-row">
               <span className="cost-row-label">Rate / sq ft / month</span>
-              <span className="cost-row-value">&#8377;{RATE_PER_SQFT_PER_MONTH}</span>
+              <span className="cost-row-value">Rs {RATE_PER_SQFT_PER_MONTH}</span>
             </div>
             <div className="cost-row">
               <span className="cost-row-label">Duration</span>
@@ -224,7 +206,7 @@ export default function BookSlot() {
             </div>
             <div className="cost-row total-row">
               <span className="cost-row-label">Storage Cost</span>
-              <span className="cost-row-value">&#8377;{storageCost.toLocaleString("en-IN")}</span>
+              <span className="cost-row-value">Rs {storageCost.toLocaleString("en-IN")}</span>
             </div>
           </div>
 
@@ -233,22 +215,18 @@ export default function BookSlot() {
             <h3 style={{ marginBottom: "1rem" }}>Loan Eligibility</h3>
             <div className="cost-row">
               <span className="cost-row-label">Market Rate ({form.produce})</span>
-              <span className="cost-row-value">&#8377;{produceRate}/tonne</span>
+              <span className="cost-row-value">Rs {produceRate}/tonne</span>
             </div>
             <div className="cost-row">
               <span className="cost-row-label">Estimated Value</span>
-              <span className="cost-row-value">&#8377;{produceValue.toLocaleString("en-IN")}</span>
+              <span className="cost-row-value">Rs {produceValue.toLocaleString("en-IN")}</span>
             </div>
             <div className="cost-row total-row">
               <span className="cost-row-label">Loan Eligible (70%)</span>
-              <span className="cost-row-value">&#8377;{loanEligibility.toLocaleString("en-IN")}</span>
+              <span className="cost-row-value">Rs {loanEligibility.toLocaleString("en-IN")}</span>
             </div>
             <div style={{ marginTop: "12px" }}>
-              {loanEligible ? (
-                <span className="badge status-confirmed">Loan Eligible</span>
-              ) : (
-                <span className="badge badge-muted">Below loan threshold</span>
-              )}
+              {loanEligible ? <span className="badge status-confirmed">Loan Eligible</span> : <span className="badge badge-muted">Below loan threshold</span>}
             </div>
           </div>
         </div>

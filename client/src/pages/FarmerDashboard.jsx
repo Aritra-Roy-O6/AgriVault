@@ -1,33 +1,25 @@
-﻿import { useEffect, useState } from "react";
+import { useEffect, useState } from "react";
 import { useNavigate } from "react-router-dom";
 import toast from "react-hot-toast";
-import { auth, apiBaseUrl } from "../firebase";
+import { apiBaseUrl, getAuthHeaders } from "../firebase";
 import MapView from "../components/MapView";
 import WarehouseCard from "../components/WarehouseCard";
 
-async function getToken() {
-  const user = auth.currentUser;
-  if (!user) throw new Error("Not signed in.");
-  return user.getIdToken();
-}
-
-export default function FarmerDashboard() {
+export default function FarmerDashboard({ loading: sessionLoading, user }) {
   const navigate = useNavigate();
   const [activeTab, setActiveTab] = useState("storage");
   const [warehouses, setWarehouses] = useState([]);
   const [bookings, setBookings] = useState([]);
   const [loadingWh, setLoadingWh] = useState(true);
-  const [loadingBk, setLoadingBk] = useState(true);
+  const [loadingBk, setLoadingBk] = useState(false);
 
   useEffect(() => {
     (async () => {
+      setLoadingWh(true);
       try {
-        const token = await getToken();
-        const res = await fetch(`${apiBaseUrl}/api/warehouses`, {
-          headers: { Authorization: `Bearer ${token}` },
-        });
+        const res = await fetch(`${apiBaseUrl}/api/warehouses`);
         const data = await res.json();
-        if (!res.ok) throw new Error(data.message);
+        if (!res.ok) throw new Error(data.message || "Unable to load warehouses.");
         setWarehouses(data.warehouses || []);
       } catch (err) {
         toast.error(err.message);
@@ -38,15 +30,19 @@ export default function FarmerDashboard() {
   }, []);
 
   useEffect(() => {
-    if (activeTab !== "bookings") return;
+    if (sessionLoading || !user || activeTab !== "bookings") {
+      return;
+    }
+
     (async () => {
+      setLoadingBk(true);
       try {
-        const token = await getToken();
-        const res = await fetch(`${apiBaseUrl}/api/bookings/my`, {
-          headers: { Authorization: `Bearer ${token}` },
+        const headers = await getAuthHeaders();
+        const res = await fetch(`${apiBaseUrl}/api/bookings/farmer/${user.uid}`, {
+          headers,
         });
         const data = await res.json();
-        if (!res.ok) throw new Error(data.message);
+        if (!res.ok) throw new Error(data.message || "Unable to load bookings.");
         setBookings(data.bookings || []);
       } catch (err) {
         toast.error(err.message);
@@ -54,7 +50,7 @@ export default function FarmerDashboard() {
         setLoadingBk(false);
       }
     })();
-  }, [activeTab]);
+  }, [activeTab, sessionLoading, user]);
 
   const handleBook = (warehouse) => {
     navigate(`/book?warehouseId=${warehouse.id}`);
@@ -62,39 +58,26 @@ export default function FarmerDashboard() {
 
   return (
     <main className="page fade-up">
-      {/* Tabs */}
       <div className="row-between">
         <div>
           <p className="eyebrow">Farmer Dashboard</p>
-          <h2 style={{ margin: 0 }}>Find &amp; Manage Storage</h2>
+          <h2 style={{ margin: 0 }}>Find and Manage Storage</h2>
         </div>
         <div className="tab-strip">
-          <button
-            className={`inner-tab${activeTab === "storage" ? " active" : ""}`}
-            onClick={() => setActiveTab("storage")}
-            type="button"
-          >
-            &#128205; Find Storage
+          <button className={`inner-tab${activeTab === "storage" ? " active" : ""}`} onClick={() => setActiveTab("storage")} type="button">
+            Find Storage
           </button>
-          <button
-            className={`inner-tab${activeTab === "bookings" ? " active" : ""}`}
-            onClick={() => setActiveTab("bookings")}
-            type="button"
-          >
-            &#128203; My Bookings
+          <button className={`inner-tab${activeTab === "bookings" ? " active" : ""}`} onClick={() => setActiveTab("bookings")} type="button">
+            My Bookings
           </button>
         </div>
       </div>
 
-      {/* Find Storage */}
-      {activeTab === "storage" && (
+      {activeTab === "storage" ? (
         <section className="page two-column">
-          {/* Left: Cards */}
           <div style={{ display: "grid", gap: "16px", alignContent: "start" }}>
             <p className="section-subtitle">
-              {loadingWh
-                ? "Loading nearby warehouses..."
-                : `${warehouses.length} warehouse${warehouses.length !== 1 ? "s" : ""} found`}
+              {loadingWh ? "Loading nearby warehouses..." : `${warehouses.length} warehouse${warehouses.length !== 1 ? "s" : ""} found`}
             </p>
             {loadingWh ? (
               <>
@@ -104,34 +87,21 @@ export default function FarmerDashboard() {
             ) : warehouses.length === 0 ? (
               <div className="card">
                 <div className="empty-state">
-                  <span className="empty-state-icon">&#127981;</span>
+                  <span className="empty-state-icon">Warehouse</span>
                   <p className="empty-state-title">No warehouses found</p>
                   <p className="empty-state-sub">Check back later or try a different area.</p>
                 </div>
               </div>
             ) : (
-              warehouses.map((w) => (
-                <WarehouseCard
-                  key={w.id}
-                  warehouse={w}
-                  onBook={handleBook}
-                />
-              ))
+              warehouses.map((w) => <WarehouseCard key={w.id} onBook={handleBook} warehouse={w} />)
             )}
           </div>
 
-          {/* Right: Map */}
           <div className="card" style={{ padding: 0, overflow: "hidden" }}>
-            <MapView
-              warehouses={warehouses}
-              onBook={handleBook}
-            />
+            <MapView onBook={handleBook} warehouses={warehouses} />
           </div>
         </section>
-      )}
-
-      {/* My Bookings */}
-      {activeTab === "bookings" && (
+      ) : (
         <section style={{ display: "grid", gap: "16px" }}>
           {loadingBk ? (
             <>
@@ -141,15 +111,10 @@ export default function FarmerDashboard() {
           ) : bookings.length === 0 ? (
             <div className="card">
               <div className="empty-state">
-                <span className="empty-state-icon">&#128203;</span>
+                <span className="empty-state-icon">Bookings</span>
                 <p className="empty-state-title">No bookings yet</p>
                 <p className="empty-state-sub">Find a warehouse and book your first slot.</p>
-                <button
-                  className="button"
-                  onClick={() => setActiveTab("storage")}
-                  style={{ marginTop: "12px" }}
-                  type="button"
-                >
+                <button className="button" onClick={() => setActiveTab("storage")} style={{ marginTop: "12px" }} type="button">
                   Browse Warehouses
                 </button>
               </div>
@@ -161,31 +126,21 @@ export default function FarmerDashboard() {
                   <div>
                     <p className="booking-card-title">{booking.warehouseName || "Warehouse"}</p>
                     <div className="booking-card-meta">
-                      <span>&#127807; {booking.produce}</span>
-                      <span>&#128203; {booking.quantity} tonnes</span>
-                      {booking.startDate && <span>&#128197; {booking.startDate}</span>}
+                      <span>{booking.produce}</span>
+                      <span>{booking.weight}</span>
+                      <span>{new Date(booking.createdAt).toLocaleDateString("en-IN")}</span>
                     </div>
                   </div>
-                  <span className={`badge status-${booking.status}`}>
-                    {booking.status}
-                  </span>
+                  <span className={`badge status-${booking.status}`}>{booking.status}</span>
                 </div>
                 <div className="booking-card-actions">
-                  {booking.status === "confirmed" && (
-                    <button
-                      className="button-secondary button-ghost"
-                      onClick={() => navigate(`/grade/${booking.id}`)}
-                      type="button"
-                    >
-                      &#129302; Grade Produce
+                  {booking.status === "confirmed" ? (
+                    <button className="button-secondary button-ghost" onClick={() => navigate(`/grade/${booking.id}`)} type="button">
+                      Grade Produce
                     </button>
-                  )}
-                  <button
-                    className="button-ghost"
-                    onClick={() => navigate(`/receipt/${booking.id}`)}
-                    type="button"
-                  >
-                    &#128196; View Receipt
+                  ) : null}
+                  <button className="button-ghost" onClick={() => navigate(`/receipt/${booking.id}`)} type="button">
+                    View Receipt
                   </button>
                 </div>
               </article>

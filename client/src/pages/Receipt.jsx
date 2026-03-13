@@ -1,4 +1,4 @@
-﻿import { useEffect, useState } from "react";
+import { useEffect, useState } from "react";
 import { useParams, Link } from "react-router-dom";
 import toast from "react-hot-toast";
 import { auth, apiBaseUrl } from "../firebase";
@@ -120,22 +120,22 @@ export default function Receipt() {
               <span style={{ fontWeight:600, textTransform:"capitalize" }}>{booking.produce}</span>
             </div>
           )}
-          {booking.quantity && (
+          {booking.weight && (
             <div className="receipt-row">
               <span style={{ color:"var(--clr-ink-muted)" }}>Quantity</span>
-              <span style={{ fontWeight:600 }}>{booking.quantity} tonnes</span>
+              <span style={{ fontWeight:600 }}>{booking.weight} tonnes</span>
             </div>
           )}
-          {booking.startDate && (
+          {booking.createdAt && (
             <div className="receipt-row">
-              <span style={{ color:"var(--clr-ink-muted)" }}>Start Date</span>
-              <span style={{ fontWeight:600 }}>{new Date(booking.startDate).toLocaleDateString("en-IN")}</span>
+              <span style={{ color:"var(--clr-ink-muted)" }}>Date</span>
+              <span style={{ fontWeight:600 }}>{new Date(booking.createdAt).toLocaleDateString("en-IN")}</span>
             </div>
           )}
-          {booking.months && (
+          {booking.duration && (
             <div className="receipt-row">
               <span style={{ color:"var(--clr-ink-muted)" }}>Duration</span>
-              <span style={{ fontWeight:600 }}>{booking.months} month{booking.months > 1 ? "s" : ""}</span>
+              <span style={{ fontWeight:600 }}>{booking.duration} month{booking.duration > 1 ? "s" : ""}</span>
             </div>
           )}
           {booking.sqft && (
