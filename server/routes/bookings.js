@@ -20,6 +20,14 @@ function requiredString(value) {
   return typeof value === "string" && value.trim().length > 0;
 }
 
+function optionalTrimmedString(value, maxLength = 500) {
+  if (typeof value !== "string") {
+    return "";
+  }
+
+  return value.trim().slice(0, maxLength);
+}
+
 router.get("/farmer/:uid", verifyToken, async (req, res) => {
   try {
     if (req.user.uid !== req.params.uid) {
@@ -109,6 +117,7 @@ router.post("/", verifyToken, async (req, res) => {
     const duration = Number(req.body.duration);
     const totalPriceInput = Number(req.body.totalPrice);
     const stackable = Boolean(req.body.stackable);
+    const bookerNote = optionalTrimmedString(req.body.bookerNote || req.body.noteToOwner);
 
     if (!weight || weight <= 0) {
       return res.status(400).json({ message: "Quantity must be greater than zero." });
@@ -176,8 +185,6 @@ router.post("/", verifyToken, async (req, res) => {
         warehouseId: req.body.warehouseId,
         warehouseName: warehouse.name,
         farmerName: req.body.farmerName,
-        buyerRole: req.body.buyerRole || "farmer",
-        buyerEmail: req.user.email || "",
         phone: req.body.phone,
         produce: req.body.produce,
         weight,
@@ -185,6 +192,7 @@ router.post("/", verifyToken, async (req, res) => {
         duration,
         startDate: req.body.startDate,
         totalPrice,
+        originalTotalPrice: totalPrice,
         pricePerSqft: Number(warehouse.pricePerSqft),
         stackable,
         warehouseHeightFt: Number(warehouse.heightFt || 10),
@@ -194,6 +202,8 @@ router.post("/", verifyToken, async (req, res) => {
         handlingFactor: spaceCalculation.handlingFactor,
         loanEligibility: Number(req.body.loanEligibility || 0),
         estimatedProduceValue: Number(req.body.estimatedProduceValue || 0),
+        bookerNote: bookerNote || null,
+        ownerResponseNote: null,
         gradingSessionId,
         bookingImage: req.body.bookingImage || null,
         gradeResult: gradingSession
@@ -202,7 +212,6 @@ router.post("/", verifyToken, async (req, res) => {
               annotatedImageB64: null,
             }
           : null,
-        buyerRating: req.body.buyerRating || null,
         status: "pending",
         spaceReserved: true,
         createdAt: new Date().toISOString(),
@@ -256,6 +265,17 @@ router.patch("/:id/status", verifyToken, async (req, res) => {
       return res.status(400).json({ message: "Invalid booking status." });
     }
 
+    const ownerResponseNote = optionalTrimmedString(req.body.ownerResponseNote);
+    const requestedTotalPrice = req.body.totalPrice;
+    const nextTotalPrice =
+      requestedTotalPrice === undefined || requestedTotalPrice === null || requestedTotalPrice === ""
+        ? null
+        : Number(requestedTotalPrice);
+
+    if (nextTotalPrice !== null && (!Number.isFinite(nextTotalPrice) || nextTotalPrice <= 0)) {
+      return res.status(400).json({ message: "Updated total price must be greater than zero." });
+    }
+
     const bookingRef = db.collection("bookings").doc(req.params.id);
     const updatedBooking = await db.runTransaction(async (transaction) => {
       const bookingDoc = await transaction.get(bookingRef);
@@ -295,13 +315,25 @@ router.patch("/:id/status", verifyToken, async (req, res) => {
         nextReserved = true;
       }
 
+      const bookingUpdate = {
+        status: nextStatus,
+        spaceReserved: nextReserved,
+        updatedAt: new Date().toISOString(),
+      };
+
+      if (ownerResponseNote) {
+        bookingUpdate.ownerResponseNote = ownerResponseNote;
+      }
+
+      if (nextTotalPrice !== null) {
+        bookingUpdate.totalPrice = nextTotalPrice;
+        bookingUpdate.priceUpdatedByOwner = nextTotalPrice !== Number(booking.originalTotalPrice ?? booking.totalPrice ?? 0);
+        bookingUpdate.ownerPriceUpdatedAt = new Date().toISOString();
+      }
+
       transaction.set(
         bookingRef,
-        {
-          status: nextStatus,
-          spaceReserved: nextReserved,
-          updatedAt: new Date().toISOString(),
-        },
+        bookingUpdate,
         { merge: true }
       );
 
@@ -319,8 +351,7 @@ router.patch("/:id/status", verifyToken, async (req, res) => {
       return {
         id: bookingDoc.id,
         ...booking,
-        status: nextStatus,
-        spaceReserved: nextReserved,
+        ...bookingUpdate,
       };
     });
 
@@ -331,95 +362,6 @@ router.patch("/:id/status", verifyToken, async (req, res) => {
       statusCode = 404;
     }
     if (error.message === "Not allowed to update this booking.") {
-      statusCode = 403;
-    }
-    return res.status(statusCode).json({ message: error.message });
-  }
-});
-
-router.patch("/:id/rating", verifyToken, async (req, res) => {
-  try {
-    const score = Number(req.body.score);
-    if (!Number.isInteger(score) || score < 1 || score > 5) {
-      return res.status(400).json({ message: "Rating must be an integer between 1 and 5." });
-    }
-
-    const bookingRef = db.collection("bookings").doc(req.params.id);
-    const updatedBooking = await db.runTransaction(async (transaction) => {
-      const bookingDoc = await transaction.get(bookingRef);
-
-      if (!bookingDoc.exists) {
-        throw new Error("Booking not found.");
-      }
-
-      const booking = bookingDoc.data();
-      if (booking.farmerId !== req.user.uid) {
-        throw new Error("Not allowed to rate this booking.");
-      }
-
-      if (!["confirmed", "completed"].includes(booking.status)) {
-        throw new Error("Only confirmed bookings can be rated.");
-      }
-
-      const warehouseRef = db.collection("warehouses").doc(booking.warehouseId);
-      const warehouseDoc = await transaction.get(warehouseRef);
-      if (!warehouseDoc.exists) {
-        throw new Error("Warehouse not found.");
-      }
-
-      const warehouse = warehouseDoc.data();
-      const previousScore = Number(booking.buyerRating?.score || 0);
-      let ratingCount = Number(warehouse.ratingCount || 0);
-      let ratingTotal = Number(warehouse.ratingTotal || 0);
-
-      if (previousScore > 0) {
-        ratingTotal -= previousScore;
-      } else {
-        ratingCount += 1;
-      }
-
-      ratingTotal += score;
-      const averageRating = ratingCount > 0 ? Number((ratingTotal / ratingCount).toFixed(1)) : 0;
-      const buyerRating = {
-        score,
-        ratedAt: new Date().toISOString(),
-        ratedByUid: req.user.uid,
-      };
-
-      transaction.set(
-        bookingRef,
-        {
-          buyerRating,
-          updatedAt: new Date().toISOString(),
-        },
-        { merge: true }
-      );
-
-      transaction.set(
-        warehouseRef,
-        {
-          rating: averageRating,
-          ratingCount,
-          ratingTotal,
-          updatedAt: new Date().toISOString(),
-        },
-        { merge: true }
-      );
-
-      return {
-        id: bookingDoc.id,
-        ...booking,
-        buyerRating,
-      };
-    });
-
-    return res.json({ booking: updatedBooking });
-  } catch (error) {
-    let statusCode = 400;
-    if (error.message === "Booking not found." || error.message === "Warehouse not found.") {
-      statusCode = 404;
-    }
-    if (error.message === "Not allowed to rate this booking.") {
       statusCode = 403;
     }
     return res.status(statusCode).json({ message: error.message });
@@ -451,3 +393,4 @@ router.post("/:id/grade", verifyToken, upload.single("produceImage"), async (req
 });
 
 export default router;
+

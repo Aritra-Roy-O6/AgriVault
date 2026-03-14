@@ -199,6 +199,11 @@ export default function Receipt() {
           <div className="receipt-row"><span>Quantity</span><strong>{booking.weight || 0}</strong></div>
           <div className="receipt-row"><span>Storage Period</span><strong>{booking.duration || 0}</strong></div>
           <div className="receipt-row"><span>Total Cost</span><strong>Rs {Number(booking.totalPrice || 0).toLocaleString("en-IN")}</strong></div>
+          {Number(booking.originalTotalPrice || 0) > 0 && Number(booking.originalTotalPrice) !== Number(booking.totalPrice || 0) ? (
+            <div className="receipt-row"><span>Original Quoted Cost</span><strong>Rs {Number(booking.originalTotalPrice || 0).toLocaleString("en-IN")}</strong></div>
+          ) : null}
+          {booking.bookerNote ? <div className="receipt-row"><span>Booker Note</span><strong>{booking.bookerNote}</strong></div> : null}
+          {booking.ownerResponseNote ? <div className="receipt-row"><span>Owner Reply</span><strong>{booking.ownerResponseNote}</strong></div> : null}
           {Number(booking.loanEligibility || 0) > 0 ? (
             <div className="receipt-row"><span>Loan Eligibility</span><strong>Rs {Number(booking.loanEligibility || 0).toLocaleString("en-IN")}</strong></div>
           ) : null}

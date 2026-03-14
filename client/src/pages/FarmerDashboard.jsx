@@ -17,7 +17,9 @@ function canOpenReceipt(status) {
 
 export default function FarmerDashboard({ loading: sessionLoading, user }) {
   const navigate = useNavigate();
+  // Doc 4: destructure i18n for language switching
   const { t, i18n } = useTranslation("farmer");
+
   const [activeTab, setActiveTab] = useState("storage");
   const [warehouses, setWarehouses] = useState([]);
   const [bookings, setBookings] = useState([]);
@@ -27,9 +29,12 @@ export default function FarmerDashboard({ loading: sessionLoading, user }) {
   const [radiusKm, setRadiusKm] = useState("50");
   const [locationLoading, setLocationLoading] = useState(false);
   const [locationError, setLocationError] = useState("");
+  // Doc 3: modal state for listing detail view
   const [selectedWarehouse, setSelectedWarehouse] = useState(null);
+  // Doc 3: tracks which booking is currently being rated
   const [ratingBookingId, setRatingBookingId] = useState(null);
 
+  // Doc 4: restore persisted language on mount
   useEffect(() => {
     const stored = localStorage.getItem("farmerLanguage") || "en";
     if (i18n.language !== stored) {
@@ -37,6 +42,7 @@ export default function FarmerDashboard({ loading: sessionLoading, user }) {
     }
   }, [i18n]);
 
+  // Load all produce-compatible warehouses
   useEffect(() => {
     (async () => {
       setLoadingWh(true);
@@ -47,7 +53,9 @@ export default function FarmerDashboard({ loading: sessionLoading, user }) {
         setWarehouses(
           (data.warehouses || []).filter((warehouse) =>
             (warehouse.supportedCategories || warehouse.produces || []).some((item) =>
-              ["grains", "fruits", "vegetables", "produce", "wheat", "rice", "pulses"].includes(String(item).toLowerCase())
+              ["grains", "fruits", "vegetables", "produce", "wheat", "rice", "pulses"].includes(
+                String(item).toLowerCase()
+              )
             )
           )
         );
@@ -59,6 +67,7 @@ export default function FarmerDashboard({ loading: sessionLoading, user }) {
     })();
   }, []);
 
+  // Load farmer's bookings when that tab is active
   useEffect(() => {
     if (sessionLoading || !user || activeTab !== "bookings") {
       return;
@@ -68,9 +77,7 @@ export default function FarmerDashboard({ loading: sessionLoading, user }) {
       setLoadingBk(true);
       try {
         const headers = await getAuthHeaders();
-        const res = await fetch(`${apiBaseUrl}/api/bookings/farmer/${user.uid}`, {
-          headers,
-        });
+        const res = await fetch(`${apiBaseUrl}/api/bookings/farmer/${user.uid}`, { headers });
         const data = await res.json();
         if (!res.ok) throw new Error(data.message || "Unable to load bookings.");
         setBookings(data.bookings || []);
@@ -89,14 +96,13 @@ export default function FarmerDashboard({ loading: sessionLoading, user }) {
 
   const nearbyWarehouses = useMemo(() => {
     const withDistance = attachDistance(warehouses, buyerLocation);
-
-    if (!hasCoordinates(buyerLocation)) {
-      return withDistance;
-    }
-
-    return sortByDistance(withDistance).filter((warehouse) => withinRadius(warehouse.distanceKm, radiusKm));
+    if (!hasCoordinates(buyerLocation)) return withDistance;
+    return sortByDistance(withDistance).filter((warehouse) =>
+      withinRadius(warehouse.distanceKm, radiusKm)
+    );
   }, [buyerLocation, radiusKm, warehouses]);
 
+  // Doc 3: includes `details` label for the listing modal trigger
   const warehouseLabels = useMemo(
     () => ({
       spaceTypeFallback: t("cardSpaceTypeFallback"),
@@ -114,6 +120,7 @@ export default function FarmerDashboard({ loading: sessionLoading, user }) {
     [t]
   );
 
+  // Doc 3+4 merged: includes `rating` key (Doc 3) alongside all other map labels
   const mapLabels = useMemo(
     () => ({
       spaceTypeFallback: t("cardSpaceTypeFallback"),
@@ -123,16 +130,19 @@ export default function FarmerDashboard({ loading: sessionLoading, user }) {
       general: t("mapGeneral"),
       match: t("mapMatch"),
       distance: "Distance",
+      rating: "Rating",
       book: t("mapBook"),
     }),
     [t]
   );
 
+  // Doc 4: persist and apply language selection
   const changeLanguage = (nextLanguage) => {
     localStorage.setItem("farmerLanguage", nextLanguage);
     i18n.changeLanguage(nextLanguage);
   };
 
+  // Doc 3: clears the listing modal before navigating to booking page
   const handleBook = (warehouse) => {
     setSelectedWarehouse(null);
     navigate(`/book?warehouseId=${warehouse.id}`);
@@ -163,11 +173,7 @@ export default function FarmerDashboard({ loading: sessionLoading, user }) {
         setLocationLoading(false);
         toast.error(message);
       },
-      {
-        enableHighAccuracy: true,
-        timeout: 10000,
-        maximumAge: 300000,
-      }
+      { enableHighAccuracy: true, timeout: 10000, maximumAge: 300000 }
     );
   };
 
@@ -176,21 +182,21 @@ export default function FarmerDashboard({ loading: sessionLoading, user }) {
     setLocationError("");
   };
 
+  // Doc 3: submit a star rating for a completed/confirmed booking
   const handleRateBooking = async (bookingId, score) => {
     setRatingBookingId(bookingId);
     try {
       const headers = await getAuthHeaders();
       const res = await fetch(`${apiBaseUrl}/api/bookings/${bookingId}/rating`, {
         method: "PATCH",
-        headers: {
-          "Content-Type": "application/json",
-          ...headers,
-        },
+        headers: { "Content-Type": "application/json", ...headers },
         body: JSON.stringify({ score }),
       });
       const data = await res.json();
       if (!res.ok) throw new Error(data.message || "Unable to save rating.");
-      setBookings((current) => current.map((booking) => (booking.id === bookingId ? data.booking : booking)));
+      setBookings((current) =>
+        current.map((booking) => (booking.id === bookingId ? data.booking : booking))
+      );
       toast.success("Rating saved.");
     } catch (error) {
       toast.error(error.message);
@@ -213,6 +219,7 @@ export default function FarmerDashboard({ loading: sessionLoading, user }) {
           <h2 style={{ margin: 0 }}>{t("title")}</h2>
         </div>
         <div className="dashboard-toolbar">
+          {/* Doc 4: language switcher with localStorage persistence */}
           <div className="language-switcher">
             {[
               ["en", t("languageEnglish")],
@@ -230,10 +237,18 @@ export default function FarmerDashboard({ loading: sessionLoading, user }) {
             ))}
           </div>
           <div className="tab-strip">
-            <button className={`inner-tab${activeTab === "storage" ? " active" : ""}`} onClick={() => setActiveTab("storage")} type="button">
+            <button
+              className={`inner-tab${activeTab === "storage" ? " active" : ""}`}
+              onClick={() => setActiveTab("storage")}
+              type="button"
+            >
               {t("storageTab")}
             </button>
-            <button className={`inner-tab${activeTab === "bookings" ? " active" : ""}`} onClick={() => setActiveTab("bookings")} type="button">
+            <button
+              className={`inner-tab${activeTab === "bookings" ? " active" : ""}`}
+              onClick={() => setActiveTab("bookings")}
+              type="button"
+            >
               {t("bookingsTab")}
             </button>
           </div>
@@ -243,6 +258,7 @@ export default function FarmerDashboard({ loading: sessionLoading, user }) {
       {activeTab === "storage" ? (
         <section className="page two-column">
           <div style={{ display: "grid", gap: "16px", alignContent: "start" }}>
+            {/* Location filter card */}
             <div className="card buyer-location-card">
               <div className="row-between" style={{ alignItems: "flex-end" }}>
                 <div>
@@ -253,7 +269,12 @@ export default function FarmerDashboard({ loading: sessionLoading, user }) {
                   </p>
                 </div>
                 <div className="actions">
-                  <button className="button-secondary" disabled={locationLoading} onClick={requestBuyerLocation} type="button">
+                  <button
+                    className="button-secondary"
+                    disabled={locationLoading}
+                    onClick={requestBuyerLocation}
+                    type="button"
+                  >
                     {locationLoading ? "Locating..." : "Use My Location"}
                   </button>
                   {hasCoordinates(buyerLocation) ? (
@@ -282,6 +303,7 @@ export default function FarmerDashboard({ loading: sessionLoading, user }) {
             </div>
 
             <p className="section-subtitle">{storageSubtitle}</p>
+
             {loadingWh ? (
               <>
                 <div className="skeleton" style={{ height: "160px", borderRadius: "16px" }} />
@@ -305,6 +327,7 @@ export default function FarmerDashboard({ loading: sessionLoading, user }) {
                   key={warehouse.id}
                   labels={warehouseLabels}
                   onBook={handleBook}
+                  // Doc 3: opens the ListingModal detail view
                   onOpen={setSelectedWarehouse}
                   warehouse={warehouse}
                 />
@@ -317,6 +340,7 @@ export default function FarmerDashboard({ loading: sessionLoading, user }) {
           </div>
         </section>
       ) : (
+        // Bookings tab
         <section style={{ display: "grid", gap: "16px" }}>
           {loadingBk ? (
             <>
@@ -329,7 +353,12 @@ export default function FarmerDashboard({ loading: sessionLoading, user }) {
                 <span className="empty-state-icon">Bookings</span>
                 <p className="empty-state-title">{t("noBookingsTitle")}</p>
                 <p className="empty-state-sub">{t("noBookingsSub")}</p>
-                <button className="button" onClick={() => setActiveTab("storage")} style={{ marginTop: "12px" }} type="button">
+                <button
+                  className="button"
+                  onClick={() => setActiveTab("storage")}
+                  style={{ marginTop: "12px" }}
+                  type="button"
+                >
                   {t("browse")}
                 </button>
               </div>
@@ -343,12 +372,22 @@ export default function FarmerDashboard({ loading: sessionLoading, user }) {
                     <div className="booking-card-meta">
                       <span>{booking.produce}</span>
                       <span>{booking.weight}</span>
+                      {/* Doc 4: total price in meta row */}
+                      <span>Rs {Number(booking.totalPrice || 0).toLocaleString("en-IN")}</span>
                       <span>{new Date(booking.createdAt).toLocaleDateString("en-IN")}</span>
                     </div>
+                    {/* Doc 4: booker note and owner reply */}
+                    {booking.bookerNote ? (
+                      <p className="section-subtitle" style={{ margin: "8px 0 0" }}>Your note: {booking.bookerNote}</p>
+                    ) : null}
+                    {booking.ownerResponseNote ? (
+                      <p className="section-subtitle" style={{ margin: "6px 0 0" }}>Owner reply: {booking.ownerResponseNote}</p>
+                    ) : null}
                   </div>
                   <span className={`badge status-${booking.status}`}>{booking.status}</span>
                 </div>
 
+                {/* Doc 3: inline star rating for confirmed / completed bookings */}
                 {canOpenReceipt(booking.status) ? (
                   <div className="booking-feedback-block">
                     <p className="listing-detail-label">Rate This Space</p>
@@ -368,16 +407,28 @@ export default function FarmerDashboard({ loading: sessionLoading, user }) {
                 ) : null}
 
                 <div className="booking-card-actions">
-                  <button className="button-secondary button-ghost" onClick={() => navigate(`/book?warehouseId=${booking.warehouseId}`)} type="button">
+                  <button
+                    className="button-secondary button-ghost"
+                    onClick={() => navigate(`/book?warehouseId=${booking.warehouseId}`)}
+                    type="button"
+                  >
                     {t("rebook")}
                   </button>
                   {booking.status === "confirmed" ? (
-                    <button className="button-secondary button-ghost" onClick={() => navigate(`/grade/${booking.id}`)} type="button">
+                    <button
+                      className="button-secondary button-ghost"
+                      onClick={() => navigate(`/grade/${booking.id}`)}
+                      type="button"
+                    >
                       {t("grade")}
                     </button>
                   ) : null}
                   {canOpenReceipt(booking.status) ? (
-                    <button className="button-ghost" onClick={() => navigate(`/receipt/${booking.id}`)} type="button">
+                    <button
+                      className="button-ghost"
+                      onClick={() => navigate(`/receipt/${booking.id}`)}
+                      type="button"
+                    >
                       {t("receipt")}
                     </button>
                   ) : null}
@@ -388,7 +439,12 @@ export default function FarmerDashboard({ loading: sessionLoading, user }) {
         </section>
       )}
 
-      <ListingModal warehouse={selectedWarehouse} onBook={handleBook} onClose={() => setSelectedWarehouse(null)} />
+      {/* Doc 3: listing detail modal — not present in Doc 4 */}
+      <ListingModal
+        warehouse={selectedWarehouse}
+        onBook={handleBook}
+        onClose={() => setSelectedWarehouse(null)}
+      />
     </main>
   );
 }

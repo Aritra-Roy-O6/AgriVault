@@ -2,6 +2,7 @@
 import { createPortal } from "react-dom";
 import toast from "react-hot-toast";
 import { apiBaseUrl, getAuthHeaders } from "../firebase";
+import { extractGpsFromFile } from "../exifGps";
 import { getCategoryLabel, supportedStorageCategories } from "../storageMath";
 import { environmentTagOptions } from "../storageRules";
 
@@ -35,6 +36,7 @@ function getEnvironmentLabel(value) {
   return environmentTagOptions.find((option) => option.value === normalized)?.label || value;
 }
 
+// Doc 1: builds a mailto link so the owner can report a buyer
 function buildReportMailTo(booking) {
   const subject = encodeURIComponent(`VaultX report for booking ${booking.id}`);
   const body = encodeURIComponent(
@@ -48,11 +50,27 @@ function buildReportMailTo(booking) {
       "",
     ].join("\n")
   );
-
   return `mailto:contact.aritra2006@gmail.com?subject=${subject}&body=${body}`;
 }
 
+// Merged BookingModal:
+//  - Doc 1: buyer info (role, email), buyer rating, report buyer link
+//  - Doc 2: price negotiation (quotedPrice), ownerResponseNote, bookerNote,
+//           originalTotalPrice, updates payload on confirm/reject
 function BookingModal({ booking, onClose, onUpdateStatus }) {
+  const [quotedPrice, setQuotedPrice] = useState("");
+  const [ownerResponseNote, setOwnerResponseNote] = useState("");
+
+  useEffect(() => {
+    if (!booking) {
+      setQuotedPrice("");
+      setOwnerResponseNote("");
+      return;
+    }
+    setQuotedPrice(String(booking.totalPrice || ""));
+    setOwnerResponseNote(booking.ownerResponseNote || "");
+  }, [booking]);
+
   if (!booking) {
     return null;
   }
@@ -74,6 +92,7 @@ function BookingModal({ booking, onClose, onUpdateStatus }) {
           <div className="receipt-meta booking-details-panel" style={{ marginTop: 0, paddingTop: 0, borderTop: "none" }}>
             <div className="receipt-row"><span>Booking ID</span><strong>{booking.id}</strong></div>
             <div className="receipt-row"><span>Status</span><strong>{booking.status}</strong></div>
+            {/* Doc 1: buyer role & email */}
             <div className="receipt-row"><span>Buyer Type</span><strong>{booking.buyerRole || "N/A"}</strong></div>
             <div className="receipt-row"><span>Buyer Email</span><strong>{booking.buyerEmail || "N/A"}</strong></div>
             <div className="receipt-row"><span>Phone</span><strong>{booking.phone || "N/A"}</strong></div>
@@ -88,10 +107,20 @@ function BookingModal({ booking, onClose, onUpdateStatus }) {
             <div className="receipt-row"><span>Start Date</span><strong>{formatDate(booking.startDate)}</strong></div>
             <div className="receipt-row"><span>Created At</span><strong>{formatDate(booking.createdAt)}</strong></div>
             <div className="receipt-row"><span>Total Price</span><strong>Rs {Number(booking.totalPrice || 0).toLocaleString("en-IN")}</strong></div>
+            {/* Doc 2: original price when owner has negotiated */}
+            {Number(booking.originalTotalPrice || 0) > 0 && Number(booking.originalTotalPrice) !== Number(booking.totalPrice || 0) ? (
+              <div className="receipt-row"><span>Original Price</span><strong>Rs {Number(booking.originalTotalPrice).toLocaleString("en-IN")}</strong></div>
+            ) : null}
+            {/* Doc 2: notes */}
+            {booking.bookerNote ? <div className="receipt-row"><span>Booker Note</span><strong>{booking.bookerNote}</strong></div> : null}
+            {booking.ownerResponseNote ? <div className="receipt-row"><span>Owner Reply</span><strong>{booking.ownerResponseNote}</strong></div> : null}
+            {/* Doc 1: buyer rating */}
             {booking.buyerRating?.score ? (
               <div className="receipt-row"><span>Buyer Rating</span><strong>{booking.buyerRating.score} / 5</strong></div>
             ) : null}
-            {Number(booking.loanEligibility || 0) > 0 ? <div className="receipt-row"><span>Loan Eligibility</span><strong>Rs {Number(booking.loanEligibility || 0).toLocaleString("en-IN")}</strong></div> : null}
+            {Number(booking.loanEligibility || 0) > 0 ? (
+              <div className="receipt-row"><span>Loan Eligibility</span><strong>Rs {Number(booking.loanEligibility || 0).toLocaleString("en-IN")}</strong></div>
+            ) : null}
             {booking.gradeResult ? (
               <>
                 <div className="receipt-row"><span>Grade</span><strong>{booking.gradeResult.grade || "N/A"}</strong></div>
@@ -114,23 +143,60 @@ function BookingModal({ booking, onClose, onUpdateStatus }) {
           </div>
         </div>
 
-        <div className="booking-card-actions" style={{ marginTop: "16px" }}>
-          {booking.status === "pending" ? (
-            <>
-              <button className="button" onClick={() => onUpdateStatus(booking.id, "confirmed")} type="button">
+        {/* Doc 2: price negotiation + reply note when pending */}
+        {booking.status === "pending" ? (
+          <div style={{ display: "grid", gap: "12px", marginTop: "16px" }}>
+            <label>
+              Final price while accepting
+              <input
+                min="0"
+                onChange={(event) => setQuotedPrice(event.target.value)}
+                step="0.01"
+                type="number"
+                value={quotedPrice}
+              />
+            </label>
+            <label>
+              Reply to customer
+              <textarea
+                onChange={(event) => setOwnerResponseNote(event.target.value)}
+                placeholder="Reply to the note or confirm the negotiated terms."
+                rows="3"
+                value={ownerResponseNote}
+              />
+            </label>
+            <div className="booking-card-actions" style={{ marginTop: 0 }}>
+              <button
+                className="button"
+                onClick={() =>
+                  onUpdateStatus(booking.id, "confirmed", {
+                    totalPrice: quotedPrice,
+                    ownerResponseNote,
+                  })
+                }
+                type="button"
+              >
                 Confirm
               </button>
-              <button className="button-secondary button-danger" onClick={() => onUpdateStatus(booking.id, "rejected")} type="button">
+              <button
+                className="button-secondary button-danger"
+                onClick={() => onUpdateStatus(booking.id, "rejected", { ownerResponseNote })}
+                type="button"
+              >
                 Reject
               </button>
-            </>
-          ) : null}
-          {["confirmed", "completed"].includes(booking.status) ? (
+            </div>
+          </div>
+        ) : null}
+
+        {/* Doc 1: report buyer link for confirmed / completed bookings */}
+        {["confirmed", "completed"].includes(booking.status) ? (
+          <div className="booking-card-actions" style={{ marginTop: "16px" }}>
             <a className="button-ghost" href={buildReportMailTo(booking)}>
               Report Buyer
             </a>
-          ) : null}
-        </div>
+          </div>
+        ) : null}
       </div>
     </div>,
     document.body
@@ -138,7 +204,14 @@ function BookingModal({ booking, onClose, onUpdateStatus }) {
 }
 
 export default function OwnerDashboard({ loading: sessionLoading, user }) {
+  // Doc 1: refs & geotag state for location image upload
   const locationImageRef = useRef(null);
+  const [locationImageFile, setLocationImageFile] = useState(null);
+  const [locationImagePreview, setLocationImagePreview] = useState(null);
+  const [geotagMode, setGeotagMode] = useState("pending");
+  const [geotagLoading, setGeotagLoading] = useState(false);
+  const [geotagMessage, setGeotagMessage] = useState("Upload a geotagged image to auto-detect the location.");
+
   const [activeTab, setActiveTab] = useState("listings");
   const [warehouses, setWarehouses] = useState([]);
   const [bookings, setBookings] = useState([]);
@@ -147,8 +220,6 @@ export default function OwnerDashboard({ loading: sessionLoading, user }) {
   const [saving, setSaving] = useState(false);
   const [loadingWh, setLoadingWh] = useState(true);
   const [loadingBk, setLoadingBk] = useState(false);
-  const [locationImageFile, setLocationImageFile] = useState(null);
-  const [locationImagePreview, setLocationImagePreview] = useState(null);
 
   const updateForm = (event) => {
     const { name, value } = event.target;
@@ -167,10 +238,9 @@ export default function OwnerDashboard({ loading: sessionLoading, user }) {
     });
   };
 
+  // Load owner's warehouse listings
   useEffect(() => {
-    if (sessionLoading || !user) {
-      return;
-    }
+    if (sessionLoading || !user) return;
 
     (async () => {
       setLoadingWh(true);
@@ -188,10 +258,9 @@ export default function OwnerDashboard({ loading: sessionLoading, user }) {
     })();
   }, [sessionLoading, user]);
 
+  // Load bookings when that tab is active
   useEffect(() => {
-    if (sessionLoading || !user || activeTab !== "bookings") {
-      return;
-    }
+    if (sessionLoading || !user || activeTab !== "bookings") return;
 
     (async () => {
       setLoadingBk(true);
@@ -209,30 +278,59 @@ export default function OwnerDashboard({ loading: sessionLoading, user }) {
     })();
   }, [activeTab, sessionLoading, user]);
 
-  useEffect(() => () => {
-    if (locationImagePreview) {
-      URL.revokeObjectURL(locationImagePreview);
-    }
-  }, [locationImagePreview]);
+  // Doc 1: revoke object URL on unmount / change
+  useEffect(
+    () => () => {
+      if (locationImagePreview) URL.revokeObjectURL(locationImagePreview);
+    },
+    [locationImagePreview]
+  );
 
-  const handleLocationImage = (nextFile) => {
-    if (!nextFile) {
-      return;
-    }
+  // Doc 1: handle location image selection + GPS extraction
+  const handleLocationImage = async (nextFile) => {
+    if (!nextFile) return;
 
     if (!nextFile.type.startsWith("image/")) {
       toast.error("Only image files are allowed for location photos.");
       return;
     }
 
-    if (locationImagePreview) {
-      URL.revokeObjectURL(locationImagePreview);
-    }
+    if (locationImagePreview) URL.revokeObjectURL(locationImagePreview);
 
     setLocationImageFile(nextFile);
     setLocationImagePreview(URL.createObjectURL(nextFile));
+    setGeotagLoading(true);
+    setGeotagMessage("Checking the image for GPS metadata...");
+
+    try {
+      const gpsCoordinates = await extractGpsFromFile(nextFile);
+      if (gpsCoordinates) {
+        setForm((current) => ({
+          ...current,
+          lat: String(gpsCoordinates.lat),
+          lng: String(gpsCoordinates.lng),
+        }));
+        setGeotagMode("auto");
+        setGeotagMessage(`Location found in image metadata: ${gpsCoordinates.lat}, ${gpsCoordinates.lng}.`);
+        toast.success("Geotag found. Coordinates filled automatically.");
+        return;
+      }
+
+      setForm((current) => ({ ...current, lat: "", lng: "" }));
+      setGeotagMode("manual");
+      setGeotagMessage("No geotag was found in this image. Enter latitude and longitude manually.");
+      toast("No geotag found. Enter coordinates manually.");
+    } catch (_error) {
+      setForm((current) => ({ ...current, lat: "", lng: "" }));
+      setGeotagMode("manual");
+      setGeotagMessage("Could not read GPS metadata from the image. Enter latitude and longitude manually.");
+      toast("Could not read geotag. Enter coordinates manually.");
+    } finally {
+      setGeotagLoading(false);
+    }
   };
 
+  // Doc 1: upload location image to server, return asset
   const uploadLocationImage = async (headers) => {
     if (!locationImageFile) {
       throw new Error("Upload a location image before listing the space.");
@@ -248,25 +346,23 @@ export default function OwnerDashboard({ loading: sessionLoading, user }) {
       body: formData,
     });
     const data = await response.json();
-    if (!response.ok) {
-      throw new Error(data.message || "Unable to upload location image.");
-    }
-
+    if (!response.ok) throw new Error(data.message || "Unable to upload location image.");
     return data.asset;
   };
 
+  // Doc 1: reset the listing form including image / geotag state
   const resetListingForm = () => {
-    if (locationImagePreview) {
-      URL.revokeObjectURL(locationImagePreview);
-    }
+    if (locationImagePreview) URL.revokeObjectURL(locationImagePreview);
     setForm(emptyWarehouseForm);
     setLocationImageFile(null);
     setLocationImagePreview(null);
-    if (locationImageRef.current) {
-      locationImageRef.current.value = "";
-    }
+    setGeotagMode("pending");
+    setGeotagLoading(false);
+    setGeotagMessage("Upload a geotagged image to auto-detect the location.");
+    if (locationImageRef.current) locationImageRef.current.value = "";
   };
 
+  // Merged: Doc 1 validation + image upload; Doc 2 clears form via resetListingForm
   const handleAddWarehouse = async (event) => {
     event.preventDefault();
 
@@ -274,14 +370,16 @@ export default function OwnerDashboard({ loading: sessionLoading, user }) {
       toast.error("Select at least one supported category.");
       return;
     }
-
     if (!form.environmentTags.length) {
       toast.error("Select at least one environment tag.");
       return;
     }
-
     if (!locationImageFile) {
       toast.error("Upload a location picture for the space.");
+      return;
+    }
+    if (!form.lat || !form.lng) {
+      toast.error("Add latitude and longitude — use a geotagged photo or enter them manually.");
       return;
     }
 
@@ -289,12 +387,10 @@ export default function OwnerDashboard({ loading: sessionLoading, user }) {
     try {
       const headers = await getAuthHeaders();
       const locationImage = await uploadLocationImage(headers);
+
       const res = await fetch(`${apiBaseUrl}/api/warehouses`, {
         method: "POST",
-        headers: {
-          "Content-Type": "application/json",
-          ...headers,
-        },
+        headers: { "Content-Type": "application/json", ...headers },
         body: JSON.stringify({
           name: form.name,
           address: form.address,
@@ -325,21 +421,24 @@ export default function OwnerDashboard({ loading: sessionLoading, user }) {
     }
   };
 
-  const updateBookingStatus = async (bookingId, status) => {
+  // Merged: Doc 2 accepts extra `updates` payload (price, note); uses server response for optimistic update
+  const updateBookingStatus = async (bookingId, status, updates = {}) => {
     try {
       const headers = await getAuthHeaders();
       const res = await fetch(`${apiBaseUrl}/api/bookings/${bookingId}/status`, {
         method: "PATCH",
-        headers: {
-          "Content-Type": "application/json",
-          ...headers,
-        },
-        body: JSON.stringify({ status }),
+        headers: { "Content-Type": "application/json", ...headers },
+        body: JSON.stringify({ status, ...updates }),
       });
       const data = await res.json();
       if (!res.ok) throw new Error(data.message || "Unable to update booking.");
-      setBookings((prev) => prev.map((booking) => (booking.id === bookingId ? { ...booking, status } : booking)));
-      setSelectedBooking((current) => (current?.id === bookingId ? { ...current, status } : current));
+      // Doc 2: use server-returned booking object so negotiated price / note are reflected
+      setBookings((prev) =>
+        prev.map((booking) => (booking.id === bookingId ? data.booking : booking))
+      );
+      setSelectedBooking((current) =>
+        current?.id === bookingId ? data.booking : current
+      );
       toast.success(`Booking ${status}.`);
     } catch (err) {
       toast.error(err.message);
@@ -365,21 +464,37 @@ export default function OwnerDashboard({ loading: sessionLoading, user }) {
           <h2 style={{ margin: 0 }}>Manage listings and review incoming bookings</h2>
         </div>
         <div className="tab-strip">
-          <button className={`inner-tab${activeTab === "listings" ? " active" : ""}`} onClick={() => setActiveTab("listings")} type="button">
+          <button
+            className={`inner-tab${activeTab === "listings" ? " active" : ""}`}
+            onClick={() => setActiveTab("listings")}
+            type="button"
+          >
             My Listings
-            {warehouses.length > 0 ? <span className="badge badge-muted dashboard-count-chip">{warehouses.length}</span> : null}
+            {warehouses.length > 0 ? (
+              <span className="badge badge-muted dashboard-count-chip">{warehouses.length}</span>
+            ) : null}
           </button>
-          <button className={`inner-tab${activeTab === "bookings" ? " active" : ""}`} onClick={() => setActiveTab("bookings")} type="button">
+          <button
+            className={`inner-tab${activeTab === "bookings" ? " active" : ""}`}
+            onClick={() => setActiveTab("bookings")}
+            type="button"
+          >
             Bookings
-            {pendingCount > 0 ? <span className="badge status-pending dashboard-count-chip">{pendingCount}</span> : null}
+            {pendingCount > 0 ? (
+              <span className="badge status-pending dashboard-count-chip">{pendingCount}</span>
+            ) : null}
           </button>
         </div>
       </div>
 
       {activeTab === "listings" ? (
         <section className="page two-column">
+          {/* Left column: listing cards */}
           <div style={{ display: "grid", gap: "16px", alignContent: "start" }}>
-            <p className="section-subtitle">{loadingWh ? "Loading listings..." : `${warehouses.length} space${warehouses.length !== 1 ? "s" : ""} listed`}</p>
+            <p className="section-subtitle">
+              {loadingWh ? "Loading listings..." : `${warehouses.length} space${warehouses.length !== 1 ? "s" : ""} listed`}
+            </p>
+
             {loadingWh ? (
               <>
                 <div className="skeleton" style={{ height: "150px", borderRadius: "16px" }} />
@@ -400,9 +515,11 @@ export default function OwnerDashboard({ loading: sessionLoading, user }) {
 
                 return (
                   <div className="card" key={warehouse.id}>
+                    {/* Doc 1: location photo */}
                     {warehouse.locationImage?.url ? (
                       <img alt="Storage location" className="listing-photo" src={warehouse.locationImage.url} />
                     ) : null}
+
                     <div className="wcard-header" style={{ marginBottom: "10px" }}>
                       <div style={{ display: "flex", gap: "12px", alignItems: "flex-start", flex: 1 }}>
                         <div className="wcard-icon">Space</div>
@@ -410,7 +527,9 @@ export default function OwnerDashboard({ loading: sessionLoading, user }) {
                           <p className="wcard-name">{warehouse.name}</p>
                           <p className="wcard-address">{warehouse.address}</p>
                           <p className="section-subtitle" style={{ margin: "6px 0 0" }}>
-                            {warehouse.spaceType || "storage space"} | {environmentTags.map(getEnvironmentLabel).join(", ") || "general conditions"} | {warehouse.heightFt || 10} ft high
+                            {warehouse.spaceType || "storage space"} |{" "}
+                            {environmentTags.map(getEnvironmentLabel).join(", ") || "general conditions"} |{" "}
+                            {warehouse.heightFt || 10} ft high
                           </p>
                         </div>
                       </div>
@@ -418,13 +537,18 @@ export default function OwnerDashboard({ loading: sessionLoading, user }) {
                         {warehouse.availableSqft > 0 ? "Active" : "Full"}
                       </span>
                     </div>
+
                     <div className="wcard-stats">
                       <div className="wcard-stat"><span className="wcard-stat-label">Available</span><span className="wcard-stat-value">{warehouse.availableSqft} sq ft</span></div>
                       <div className="wcard-stat"><span className="wcard-stat-label">Total</span><span className="wcard-stat-value">{warehouse.sqft} sq ft</span></div>
                       <div className="wcard-stat"><span className="wcard-stat-label">Height</span><span className="wcard-stat-value">{warehouse.heightFt || 10} ft</span></div>
                       <div className="wcard-stat"><span className="wcard-stat-label">Pricing</span><span className="wcard-stat-value">Rs {warehouse.pricePerSqft}/{warehouse.pricingUnit || "month"}</span></div>
-                      {Number(warehouse.ratingCount || 0) > 0 ? <div className="wcard-stat"><span className="wcard-stat-label">Rating</span><span className="wcard-stat-value">{Number(warehouse.rating || 0).toFixed(1)}/5</span></div> : null}
+                      {/* Doc 1: rating */}
+                      {Number(warehouse.ratingCount || 0) > 0 ? (
+                        <div className="wcard-stat"><span className="wcard-stat-label">Rating</span><span className="wcard-stat-value">{Number(warehouse.rating || 0).toFixed(1)}/5</span></div>
+                      ) : null}
                     </div>
+
                     {categories.length ? (
                       <div className="listing-detail-block">
                         <p className="listing-detail-label">Supported Categories</p>
@@ -435,6 +559,7 @@ export default function OwnerDashboard({ loading: sessionLoading, user }) {
                         </div>
                       </div>
                     ) : null}
+
                     {environmentTags.length ? (
                       <div className="listing-detail-block">
                         <p className="listing-detail-label">Environment Tags</p>
@@ -451,6 +576,7 @@ export default function OwnerDashboard({ loading: sessionLoading, user }) {
             )}
           </div>
 
+          {/* Right column: add listing form */}
           <div className="card">
             <p className="eyebrow">List a Space</p>
             <h3 style={{ marginBottom: "1rem" }}>Add new storage inventory</h3>
@@ -477,16 +603,6 @@ export default function OwnerDashboard({ loading: sessionLoading, user }) {
                     <option value="godown">Godown</option>
                     <option value="warehouse bay">Warehouse bay</option>
                   </select>
-                </label>
-              </div>
-              <div className="form-row">
-                <label>
-                  Latitude
-                  <input name="lat" onChange={updateForm} placeholder="22.5726" required step="any" type="number" value={form.lat} />
-                </label>
-                <label>
-                  Longitude
-                  <input name="lng" onChange={updateForm} placeholder="88.3639" required step="any" type="number" value={form.lng} />
                 </label>
               </div>
               <div className="form-row">
@@ -552,6 +668,7 @@ export default function OwnerDashboard({ loading: sessionLoading, user }) {
                 </div>
               </fieldset>
 
+              {/* Doc 1: geotagged location image upload */}
               <div className="field">
                 <span>Location Picture</span>
                 <div className="upload-zone owner-upload-zone" onClick={() => locationImageRef.current?.click()}>
@@ -561,7 +678,7 @@ export default function OwnerDashboard({ loading: sessionLoading, user }) {
                     <>
                       <span className="upload-zone-icon">Upload</span>
                       <p style={{ fontWeight: 700, margin: 0 }}>Add a clear photo of the space</p>
-                      <p style={{ fontSize: "0.8rem", margin: 0 }}>This image will be shown to farmers and businesses.</p>
+                      <p style={{ fontSize: "0.8rem", margin: 0 }}>We will try to read GPS from the image first.</p>
                     </>
                   )}
                   <input
@@ -572,15 +689,38 @@ export default function OwnerDashboard({ loading: sessionLoading, user }) {
                     type="file"
                   />
                 </div>
+                <p className="field-hint">{geotagLoading ? "Checking geotag..." : geotagMessage}</p>
               </div>
 
-              <button className="button" disabled={saving} type="submit" style={{ marginTop: "4px" }}>
+              {/* Doc 1: show detected coordinates */}
+              {geotagMode === "auto" ? (
+                <div className="auto-coordinate-note">
+                  Detected coordinates: {form.lat}, {form.lng}
+                </div>
+              ) : null}
+
+              {/* Doc 1: manual coordinate entry fallback */}
+              {geotagMode === "manual" ? (
+                <div className="form-row">
+                  <label>
+                    Latitude
+                    <input name="lat" onChange={updateForm} placeholder="22.5726" required step="any" type="number" value={form.lat} />
+                  </label>
+                  <label>
+                    Longitude
+                    <input name="lng" onChange={updateForm} placeholder="88.3639" required step="any" type="number" value={form.lng} />
+                  </label>
+                </div>
+              ) : null}
+
+              <button className="button" disabled={saving} style={{ marginTop: "4px" }} type="submit">
                 {saving ? "Saving..." : "List Space"}
               </button>
             </form>
           </div>
         </section>
       ) : (
+        // Bookings tab
         <section style={{ display: "grid", gap: "16px" }}>
           {loadingBk ? (
             <>
@@ -601,14 +741,22 @@ export default function OwnerDashboard({ loading: sessionLoading, user }) {
                 <button className="booking-card-toggle" onClick={() => setSelectedBooking(booking)} type="button">
                   <div className="booking-card-header">
                     <div>
-                      <p className="booking-card-title">{booking.farmerName || "Customer"} - {booking.warehouseName || "Storage Space"}</p>
+                      <p className="booking-card-title">
+                        {booking.farmerName || "Customer"} - {booking.warehouseName || "Storage Space"}
+                      </p>
+                      {/* Doc 1: buyer role; Doc 2: price & booker note */}
                       <div className="booking-card-meta">
                         <span>{booking.buyerRole || "customer"}</span>
                         <span>{booking.produce || booking.storageCategory || "general goods"}</span>
                         <span>{booking.weight || booking.sqft || 0}</span>
+                        <span>Rs {Number(booking.totalPrice || 0).toLocaleString("en-IN")}</span>
                         <span>{booking.stackable ? "Stackable" : "Non-stackable"}</span>
                         <span>{formatDate(booking.createdAt)}</span>
                       </div>
+                      {/* Doc 2: inline booker note preview */}
+                      {booking.bookerNote ? (
+                        <p className="section-subtitle" style={{ margin: "8px 0 0" }}>Note: {booking.bookerNote}</p>
+                      ) : null}
                     </div>
                     <div style={{ display: "flex", gap: "10px", alignItems: "center" }}>
                       <span className={`badge status-${booking.status}`}>{booking.status}</span>
@@ -620,10 +768,20 @@ export default function OwnerDashboard({ loading: sessionLoading, user }) {
                 <div className="booking-card-actions">
                   {booking.status === "pending" ? (
                     <>
-                      <button className="button" onClick={() => updateBookingStatus(booking.id, "confirmed")} type="button">Confirm</button>
-                      <button className="button-secondary button-danger" onClick={() => updateBookingStatus(booking.id, "rejected")} type="button">Reject</button>
+                      {/* Doc 2: "Review & Confirm" opens modal with negotiation UI */}
+                      <button className="button" onClick={() => setSelectedBooking(booking)} type="button">
+                        Review & Confirm
+                      </button>
+                      <button
+                        className="button-secondary button-danger"
+                        onClick={() => updateBookingStatus(booking.id, "rejected")}
+                        type="button"
+                      >
+                        Reject
+                      </button>
                     </>
                   ) : null}
+                  {/* Doc 1: report buyer link on confirmed / completed */}
                   {["confirmed", "completed"].includes(booking.status) ? (
                     <a className="button-ghost" href={buildReportMailTo(booking)}>
                       Report Buyer
@@ -636,8 +794,11 @@ export default function OwnerDashboard({ loading: sessionLoading, user }) {
         </section>
       )}
 
-      <BookingModal booking={selectedBooking} onClose={() => setSelectedBooking(null)} onUpdateStatus={updateBookingStatus} />
+      <BookingModal
+        booking={selectedBooking}
+        onClose={() => setSelectedBooking(null)}
+        onUpdateStatus={updateBookingStatus}
+      />
     </main>
   );
 }
-

@@ -1,4 +1,5 @@
-import { signOut } from "firebase/auth";
+﻿import { signOut } from "firebase/auth";
+import { useTranslation } from "react-i18next";
 import { NavLink, useLocation, useNavigate } from "react-router-dom";
 import { auth } from "../firebase";
 
@@ -14,6 +15,7 @@ function dashboardPath(role) {
 export default function Navbar({ user, role }) {
   const navigate = useNavigate();
   const location = useLocation();
+  const { t, i18n } = useTranslation("common");
   const isHome = location.pathname === "/";
   const isPublicPage = isHome || location.pathname === "/auth";
 
@@ -23,8 +25,14 @@ export default function Navbar({ user, role }) {
     navigate("/");
   };
 
+  const changeLanguage = (language) => {
+    localStorage.setItem("appLanguage", language);
+    localStorage.setItem("farmerLanguage", language);
+    i18n.changeLanguage(language);
+  };
+
   return (
-    <header className="navbar navbar-minimal">
+    <header className="navbar navbar-minimal navbar-with-language">
       <button className="navbar-brand navbar-brand-button" onClick={() => navigate("/")} type="button">
         <div className="navbar-brand-icon">
           <svg viewBox="0 0 24 24" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
@@ -37,29 +45,48 @@ export default function Navbar({ user, role }) {
         </span>
       </button>
 
-      <nav className="navbar-nav navbar-nav-minimal">
-        {!user && isPublicPage ? (
-          <NavLink className={linkClass} to="/">
-            Home
-          </NavLink>
-        ) : null}
-        {!user ? (
-          <NavLink className={linkClass} to="/auth?role=business">
-            Login
-          </NavLink>
-        ) : (
-          <>
-            {!isHome ? (
-              <NavLink className={linkClass} to={dashboardPath(role)}>
-                Dashboard
-              </NavLink>
-            ) : null}
-            <button className="tab-link" onClick={handleLogout} type="button">
-              Logout
+      <div className="navbar-actions">
+        <div className="language-switcher navbar-language-switcher">
+          {[
+            ["en", t("languageEnglish")],
+            ["hi", t("languageHindi")],
+            ["bn", t("languageBengali")],
+          ].map(([code, label]) => (
+            <button
+              key={code}
+              className={`inner-tab${i18n.language === code ? " active" : ""}`}
+              onClick={() => changeLanguage(code)}
+              type="button"
+            >
+              {label}
             </button>
-          </>
-        )}
-      </nav>
+          ))}
+        </div>
+
+        <nav className="navbar-nav navbar-nav-minimal">
+          {!user && isPublicPage ? (
+            <NavLink className={linkClass} to="/">
+              {t("home")}
+            </NavLink>
+          ) : null}
+          {!user ? (
+            <NavLink className={linkClass} to="/auth?role=business">
+              {t("login")}
+            </NavLink>
+          ) : (
+            <>
+              {!isHome ? (
+                <NavLink className={linkClass} to={dashboardPath(role)}>
+                  {t("dashboard")}
+                </NavLink>
+              ) : null}
+              <button className="tab-link" onClick={handleLogout} type="button">
+                {t("logout")}
+              </button>
+            </>
+          )}
+        </nav>
+      </div>
     </header>
   );
 }

@@ -43,7 +43,7 @@ function normalizePricingUnit(value) {
   return "month";
 }
 
-export default function BookSlot({ loading: sessionLoading, profile, role, user }) {
+export default function BookSlot({ loading: sessionLoading, role, user }) {
   const fileRef = useRef(null);
   const [searchParams] = useSearchParams();
   const warehouseIdParam = searchParams.get("warehouseId") || "";
@@ -56,6 +56,7 @@ export default function BookSlot({ loading: sessionLoading, profile, role, user 
     duration: "1",
     startDate: "",
     phone: "",
+    bookerNote: "",
     stackable: true,
   });
   const [loading, setLoading] = useState(false);
@@ -274,7 +275,6 @@ export default function BookSlot({ loading: sessionLoading, profile, role, user 
     try {
       const headers = await getAuthHeaders();
       const bookingImage = await uploadBookingImage(headers);
-      const customerName = profile?.name || user.displayName || user.email?.split("@")[0] || "Customer";
       const res = await fetch(`${apiBaseUrl}/api/bookings`, {
         method: "POST",
         headers: {
@@ -283,8 +283,7 @@ export default function BookSlot({ loading: sessionLoading, profile, role, user 
         },
         body: JSON.stringify({
           warehouseId: form.warehouseId,
-          farmerName: customerName,
-          buyerRole: role,
+          farmerName: user.displayName || user.email?.split("@")[0] || "Customer",
           phone: form.phone.trim(),
           produce: selectedCategory,
           weight: quantity,
@@ -292,6 +291,7 @@ export default function BookSlot({ loading: sessionLoading, profile, role, user 
           duration,
           startDate: form.startDate,
           totalPrice,
+          bookerNote: form.bookerNote.trim(),
           loanEligibility,
           estimatedProduceValue,
           stackable: form.stackable,
@@ -413,6 +413,16 @@ export default function BookSlot({ loading: sessionLoading, profile, role, user 
               <input checked={form.stackable} name="stackable" onChange={updateForm} type="checkbox" />
               <span>Stackable inventory</span>
             </label>
+            <label>
+              Note to owner
+              <textarea
+                name="bookerNote"
+                onChange={updateForm}
+                placeholder="Add any storage details or a price request for the owner."
+                rows="4"
+                value={form.bookerNote}
+              />
+            </label>
             <p className="field-hint" style={{ marginTop: "-8px" }}>Turn this off for fragile or non-stackable goods.</p>
             <button className="button button-full" disabled={loading || !detailsComplete} type="submit" style={{ marginTop: "4px" }}>
               {loading ? "Submitting..." : "Submit Booking"}
@@ -430,6 +440,8 @@ export default function BookSlot({ loading: sessionLoading, profile, role, user 
                 <div className="receipt-row"><span>Booking ID</span><strong>{booking.id}</strong></div>
                 <div className="receipt-row"><span>Stackable</span><strong>{booking.stackable ? "Yes" : "No"}</strong></div>
                 <div className="receipt-row"><span>Reserved Sq Ft</span><strong>{booking.sqft}</strong></div>
+                {booking.bookerNote ? <div className="receipt-row"><span>Note to Owner</span><strong>{booking.bookerNote}</strong></div> : null}
+                {booking.ownerResponseNote ? <div className="receipt-row"><span>Owner Reply</span><strong>{booking.ownerResponseNote}</strong></div> : null}
                 {booking.gradingSessionId ? <div className="receipt-row"><span>Grading Session</span><strong>{booking.gradingSessionId}</strong></div> : null}
                 {booking.bookingImage?.url ? (
                   <div className="receipt-row"><span>Image</span><a href={booking.bookingImage.url} rel="noreferrer" target="_blank">Open</a></div>
@@ -496,9 +508,9 @@ export default function BookSlot({ loading: sessionLoading, profile, role, user 
                 {grading ? "Analyzing Produce..." : "Optional AI Grade"}
               </button>
             ) : null}
-            {mlIssue ? (
+            {mlIssue && gradeResult ? (
               <p style={{ fontSize: "0.8rem", marginTop: "12px", color: "#fbbf24" }}>
-                ML issue: {mlIssue}
+                AI service note: live ML analysis was unavailable, so a fallback grade was used. {mlIssue}
               </p>
             ) : null}
           </div>
@@ -522,5 +534,4 @@ export default function BookSlot({ loading: sessionLoading, profile, role, user 
     </main>
   );
 }
-
 
