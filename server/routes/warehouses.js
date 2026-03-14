@@ -1,4 +1,4 @@
-import express from "express";
+﻿import express from "express";
 import { db } from "../firebase-admin.js";
 import verifyToken from "../middleware/verifyToken.js";
 
@@ -88,10 +88,13 @@ router.post("/", verifyToken, async (req, res) => {
       environmentTags: parseList(req.body.environmentTags),
       spaceType: req.body.spaceType || "warehouse bay",
       pricingUnit: req.body.pricingUnit || "monthly",
+      locationImage: req.body.locationImage || null,
       ownerUid: req.user.uid,
       verified: true,
       isActive: true,
-      rating: Number(req.body.rating ?? 4.6),
+      rating: Number(req.body.rating ?? 0),
+      ratingCount: Number(req.body.ratingCount ?? 0),
+      ratingTotal: Number(req.body.ratingTotal ?? 0),
       createdAt: new Date().toISOString(),
     };
 

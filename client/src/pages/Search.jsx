@@ -1,6 +1,7 @@
 ﻿import { useEffect, useMemo, useState } from "react";
 import { useNavigate, useSearchParams } from "react-router-dom";
 import toast from "react-hot-toast";
+import ListingModal from "../components/ListingModal";
 import MapView from "../components/MapView";
 import WarehouseCard from "../components/WarehouseCard";
 import { apiBaseUrl } from "../firebase";
@@ -26,6 +27,7 @@ export default function Search() {
   const [radiusKm, setRadiusKm] = useState(searchParams.get("radius") || "50");
   const [locationLoading, setLocationLoading] = useState(false);
   const [locationError, setLocationError] = useState("");
+  const [selectedWarehouse, setSelectedWarehouse] = useState(null);
   const [filters, setFilters] = useState({
     query: searchParams.get("query") || "",
     location: searchParams.get("location") || "",
@@ -88,6 +90,7 @@ export default function Search() {
   }, [buyerLocation, filters, radiusKm, warehouses]);
 
   const handleBook = (warehouse) => {
+    setSelectedWarehouse(null);
     navigate(`/book?warehouseId=${warehouse.id}`);
   };
 
@@ -241,7 +244,7 @@ export default function Search() {
             </div>
           ) : (
             scoredListings.map((warehouse) => (
-              <WarehouseCard key={warehouse.id} onBook={handleBook} warehouse={warehouse} />
+              <WarehouseCard key={warehouse.id} onBook={handleBook} onOpen={setSelectedWarehouse} warehouse={warehouse} />
             ))
           )}
         </div>
@@ -250,7 +253,8 @@ export default function Search() {
           <MapView buyerLocation={buyerLocation} warehouses={scoredListings} />
         </div>
       </section>
+
+      <ListingModal warehouse={selectedWarehouse} onBook={handleBook} onClose={() => setSelectedWarehouse(null)} />
     </main>
   );
 }
-

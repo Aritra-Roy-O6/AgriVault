@@ -71,8 +71,9 @@ def grade_produce():
     logger.info("Grading request: produce=%s, size=%s bytes", produce_type, len(image_bytes))
     result: GradingResult = grading_engine.grade(image_bytes, produce_type)
 
-    if result.error:`n        logger.error("Grading error: %s", result.error)`n        return jsonify({"error": result.error, "details": "ML pipeline failure."}), 500
-
+    if result.error:
+        logger.error("Grading error: %s", result.error)
+        return jsonify({"error": result.error, "details": "ML pipeline failure."}), 500
     response_payload = {
         "produce_type": result.produce_type,
         "grade": result.grade,

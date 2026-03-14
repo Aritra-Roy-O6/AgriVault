@@ -17,6 +17,7 @@ export default function MapView({ warehouses = [], labels, buyerLocation }) {
     environment: labels?.environment || "Environment",
     general: labels?.general || "general",
     match: labels?.match || "Smart match",
+    rating: labels?.rating || "Rating",
     distance: labels?.distance || "Distance",
     book: labels?.book || "Book This Space",
   };
@@ -40,6 +41,7 @@ export default function MapView({ warehouses = [], labels, buyerLocation }) {
                 <p>{copy.available}: {warehouse.availableSqft || warehouse.sqft} sq ft</p>
                 <p>{copy.categories}: {(warehouse.supportedCategories || warehouse.produces || []).join(", ")}</p>
                 <p>{copy.environment}: {(warehouse.environmentTags || []).join(", ") || copy.general}</p>
+                {Number(warehouse.ratingCount || 0) > 0 ? <p>{copy.rating}: {Number(warehouse.rating || 0).toFixed(1)}/5</p> : null}
                 {Number.isFinite(Number(warehouse.distanceKm)) ? <p>{copy.distance}: {formatDistance(warehouse.distanceKm)}</p> : null}
                 {warehouse.matchScore ? <p>{copy.match}: {warehouse.matchScore}%</p> : null}
                 <Link className="button map-popup-button" to={`/book?warehouseId=${warehouse.id}`}>
@@ -53,3 +55,4 @@ export default function MapView({ warehouses = [], labels, buyerLocation }) {
     </div>
   );
 }
+

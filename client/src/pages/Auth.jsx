@@ -1,6 +1,7 @@
-import {
+﻿import {
   createUserWithEmailAndPassword,
   signInWithEmailAndPassword,
+  updateProfile,
 } from "firebase/auth";
 import { useEffect, useMemo, useState } from "react";
 import toast from "react-hot-toast";
@@ -119,12 +120,22 @@ export default function Auth({ loading: sessionLoading, role, user }) {
     });
   };
 
+  const syncDisplayName = async (nextUser, name) => {
+    const normalizedName = String(name || "").trim();
+    if (!normalizedName || nextUser.displayName === normalizedName) {
+      return;
+    }
+
+    await updateProfile(nextUser, { displayName: normalizedName });
+  };
+
   const handleSubmit = async (event) => {
     event.preventDefault();
     setLoading(true);
     try {
       if (isRegister) {
         const credential = await createUserWithEmailAndPassword(auth, form.email, form.password);
+        await syncDisplayName(credential.user, form.name);
         const userProfile = await registerProfile(credential.user);
         toast.success("Account created.");
         navigate(roleRedirect(userProfile.role), { replace: true });
@@ -141,6 +152,7 @@ export default function Auth({ loading: sessionLoading, role, user }) {
           userProfile = await bootstrapMissingProfile(credential.user);
         }
 
+        await syncDisplayName(credential.user, userProfile.name);
         toast.success("Signed in.");
         navigate(roleRedirect(userProfile.role), { replace: true });
       }

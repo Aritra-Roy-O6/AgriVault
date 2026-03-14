@@ -1,9 +1,10 @@
-import { onAuthStateChanged } from "firebase/auth";
+﻿import { onAuthStateChanged } from "firebase/auth";
 import { useEffect, useState } from "react";
 import { apiBaseUrl, auth } from "../firebase";
 
 export default function useSession() {
   const [user, setUser] = useState(null);
+  const [profile, setProfile] = useState(null);
   const [role, setRole] = useState(localStorage.getItem("userRole"));
   const [loading, setLoading] = useState(true);
 
@@ -11,6 +12,7 @@ export default function useSession() {
     const unsubscribe = onAuthStateChanged(auth, async (nextUser) => {
       if (!nextUser) {
         setUser(null);
+        setProfile(null);
         setRole(null);
         localStorage.removeItem("userRole");
         setLoading(false);
@@ -32,10 +34,12 @@ export default function useSession() {
           throw new Error(data.message || "Unable to load user profile.");
         }
 
+        setProfile(data.user);
         setRole(data.user.role);
         localStorage.setItem("userRole", data.user.role);
       } catch (_error) {
         const fallbackRole = localStorage.getItem("userRole");
+        setProfile(null);
         setRole(fallbackRole || null);
       } finally {
         setLoading(false);
@@ -45,5 +49,5 @@ export default function useSession() {
     return () => unsubscribe();
   }, []);
 
-  return { user, role, loading };
+  return { user, profile, role, loading };
 }

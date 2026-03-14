@@ -3,7 +3,9 @@ import { useNavigate } from "react-router-dom";
 import { useTranslation } from "react-i18next";
 import toast from "react-hot-toast";
 import { apiBaseUrl, getAuthHeaders } from "../firebase";
+import ListingModal from "../components/ListingModal";
 import MapView from "../components/MapView";
+import RatingInput from "../components/RatingInput";
 import WarehouseCard from "../components/WarehouseCard";
 import { attachDistance, hasCoordinates, sortByDistance, withinRadius } from "../locationUtils";
 
@@ -25,6 +27,8 @@ export default function FarmerDashboard({ loading: sessionLoading, user }) {
   const [radiusKm, setRadiusKm] = useState("50");
   const [locationLoading, setLocationLoading] = useState(false);
   const [locationError, setLocationError] = useState("");
+  const [selectedWarehouse, setSelectedWarehouse] = useState(null);
+  const [ratingBookingId, setRatingBookingId] = useState(null);
 
   useEffect(() => {
     const stored = localStorage.getItem("farmerLanguage") || "en";
@@ -104,6 +108,7 @@ export default function FarmerDashboard({ loading: sessionLoading, user }) {
       occupancy: t("cardOccupancy"),
       bestFor: t("cardBestFor"),
       distance: "Distance",
+      details: "View Details",
       book: t("cardBook"),
     }),
     [t]
@@ -129,6 +134,7 @@ export default function FarmerDashboard({ loading: sessionLoading, user }) {
   };
 
   const handleBook = (warehouse) => {
+    setSelectedWarehouse(null);
     navigate(`/book?warehouseId=${warehouse.id}`);
   };
 
@@ -168,6 +174,29 @@ export default function FarmerDashboard({ loading: sessionLoading, user }) {
   const clearBuyerLocation = () => {
     setBuyerLocation(null);
     setLocationError("");
+  };
+
+  const handleRateBooking = async (bookingId, score) => {
+    setRatingBookingId(bookingId);
+    try {
+      const headers = await getAuthHeaders();
+      const res = await fetch(`${apiBaseUrl}/api/bookings/${bookingId}/rating`, {
+        method: "PATCH",
+        headers: {
+          "Content-Type": "application/json",
+          ...headers,
+        },
+        body: JSON.stringify({ score }),
+      });
+      const data = await res.json();
+      if (!res.ok) throw new Error(data.message || "Unable to save rating.");
+      setBookings((current) => current.map((booking) => (booking.id === bookingId ? data.booking : booking)));
+      toast.success("Rating saved.");
+    } catch (error) {
+      toast.error(error.message);
+    } finally {
+      setRatingBookingId(null);
+    }
   };
 
   const storageSubtitle = loadingWh
@@ -271,7 +300,15 @@ export default function FarmerDashboard({ loading: sessionLoading, user }) {
                 </div>
               </div>
             ) : (
-              nearbyWarehouses.map((warehouse) => <WarehouseCard key={warehouse.id} labels={warehouseLabels} onBook={handleBook} warehouse={warehouse} />)
+              nearbyWarehouses.map((warehouse) => (
+                <WarehouseCard
+                  key={warehouse.id}
+                  labels={warehouseLabels}
+                  onBook={handleBook}
+                  onOpen={setSelectedWarehouse}
+                  warehouse={warehouse}
+                />
+              ))
             )}
           </div>
 
@@ -311,6 +348,25 @@ export default function FarmerDashboard({ loading: sessionLoading, user }) {
                   </div>
                   <span className={`badge status-${booking.status}`}>{booking.status}</span>
                 </div>
+
+                {canOpenReceipt(booking.status) ? (
+                  <div className="booking-feedback-block">
+                    <p className="listing-detail-label">Rate This Space</p>
+                    <div className="row-between" style={{ alignItems: "center" }}>
+                      <RatingInput
+                        currentRating={booking.buyerRating?.score || 0}
+                        disabled={ratingBookingId === booking.id}
+                        onRate={(score) => handleRateBooking(booking.id, score)}
+                      />
+                      {booking.buyerRating?.score ? (
+                        <span className="section-subtitle" style={{ margin: 0 }}>
+                          Your rating: {booking.buyerRating.score}/5
+                        </span>
+                      ) : null}
+                    </div>
+                  </div>
+                ) : null}
+
                 <div className="booking-card-actions">
                   <button className="button-secondary button-ghost" onClick={() => navigate(`/book?warehouseId=${booking.warehouseId}`)} type="button">
                     {t("rebook")}
@@ -331,6 +387,8 @@ export default function FarmerDashboard({ loading: sessionLoading, user }) {
           )}
         </section>
       )}
+
+      <ListingModal warehouse={selectedWarehouse} onBook={handleBook} onClose={() => setSelectedWarehouse(null)} />
     </main>
   );
 }

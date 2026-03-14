@@ -43,7 +43,7 @@ function normalizePricingUnit(value) {
   return "month";
 }
 
-export default function BookSlot({ loading: sessionLoading, role, user }) {
+export default function BookSlot({ loading: sessionLoading, profile, role, user }) {
   const fileRef = useRef(null);
   const [searchParams] = useSearchParams();
   const warehouseIdParam = searchParams.get("warehouseId") || "";
@@ -274,6 +274,7 @@ export default function BookSlot({ loading: sessionLoading, role, user }) {
     try {
       const headers = await getAuthHeaders();
       const bookingImage = await uploadBookingImage(headers);
+      const customerName = profile?.name || user.displayName || user.email?.split("@")[0] || "Customer";
       const res = await fetch(`${apiBaseUrl}/api/bookings`, {
         method: "POST",
         headers: {
@@ -282,7 +283,8 @@ export default function BookSlot({ loading: sessionLoading, role, user }) {
         },
         body: JSON.stringify({
           warehouseId: form.warehouseId,
-          farmerName: user.displayName || user.email?.split("@")[0] || "Customer",
+          farmerName: customerName,
+          buyerRole: role,
           phone: form.phone.trim(),
           produce: selectedCategory,
           weight: quantity,
@@ -520,4 +522,5 @@ export default function BookSlot({ loading: sessionLoading, role, user }) {
     </main>
   );
 }
+
 

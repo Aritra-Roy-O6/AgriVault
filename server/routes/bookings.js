@@ -1,4 +1,4 @@
-import express from "express";
+﻿import express from "express";
 import multer from "multer";
 import { db } from "../firebase-admin.js";
 import verifyToken from "../middleware/verifyToken.js";
@@ -176,6 +176,8 @@ router.post("/", verifyToken, async (req, res) => {
         warehouseId: req.body.warehouseId,
         warehouseName: warehouse.name,
         farmerName: req.body.farmerName,
+        buyerRole: req.body.buyerRole || "farmer",
+        buyerEmail: req.user.email || "",
         phone: req.body.phone,
         produce: req.body.produce,
         weight,
@@ -200,6 +202,7 @@ router.post("/", verifyToken, async (req, res) => {
               annotatedImageB64: null,
             }
           : null,
+        buyerRating: req.body.buyerRating || null,
         status: "pending",
         spaceReserved: true,
         createdAt: new Date().toISOString(),
@@ -334,6 +337,95 @@ router.patch("/:id/status", verifyToken, async (req, res) => {
   }
 });
 
+router.patch("/:id/rating", verifyToken, async (req, res) => {
+  try {
+    const score = Number(req.body.score);
+    if (!Number.isInteger(score) || score < 1 || score > 5) {
+      return res.status(400).json({ message: "Rating must be an integer between 1 and 5." });
+    }
+
+    const bookingRef = db.collection("bookings").doc(req.params.id);
+    const updatedBooking = await db.runTransaction(async (transaction) => {
+      const bookingDoc = await transaction.get(bookingRef);
+
+      if (!bookingDoc.exists) {
+        throw new Error("Booking not found.");
+      }
+
+      const booking = bookingDoc.data();
+      if (booking.farmerId !== req.user.uid) {
+        throw new Error("Not allowed to rate this booking.");
+      }
+
+      if (!["confirmed", "completed"].includes(booking.status)) {
+        throw new Error("Only confirmed bookings can be rated.");
+      }
+
+      const warehouseRef = db.collection("warehouses").doc(booking.warehouseId);
+      const warehouseDoc = await transaction.get(warehouseRef);
+      if (!warehouseDoc.exists) {
+        throw new Error("Warehouse not found.");
+      }
+
+      const warehouse = warehouseDoc.data();
+      const previousScore = Number(booking.buyerRating?.score || 0);
+      let ratingCount = Number(warehouse.ratingCount || 0);
+      let ratingTotal = Number(warehouse.ratingTotal || 0);
+
+      if (previousScore > 0) {
+        ratingTotal -= previousScore;
+      } else {
+        ratingCount += 1;
+      }
+
+      ratingTotal += score;
+      const averageRating = ratingCount > 0 ? Number((ratingTotal / ratingCount).toFixed(1)) : 0;
+      const buyerRating = {
+        score,
+        ratedAt: new Date().toISOString(),
+        ratedByUid: req.user.uid,
+      };
+
+      transaction.set(
+        bookingRef,
+        {
+          buyerRating,
+          updatedAt: new Date().toISOString(),
+        },
+        { merge: true }
+      );
+
+      transaction.set(
+        warehouseRef,
+        {
+          rating: averageRating,
+          ratingCount,
+          ratingTotal,
+          updatedAt: new Date().toISOString(),
+        },
+        { merge: true }
+      );
+
+      return {
+        id: bookingDoc.id,
+        ...booking,
+        buyerRating,
+      };
+    });
+
+    return res.json({ booking: updatedBooking });
+  } catch (error) {
+    let statusCode = 400;
+    if (error.message === "Booking not found." || error.message === "Warehouse not found.") {
+      statusCode = 404;
+    }
+    if (error.message === "Not allowed to rate this booking.") {
+      statusCode = 403;
+    }
+    return res.status(statusCode).json({ message: error.message });
+  }
+});
+
 router.post("/:id/grade", verifyToken, upload.single("produceImage"), async (req, res) => {
   try {
     const bookingRef = db.collection("bookings").doc(req.params.id);
@@ -359,4 +451,3 @@ router.post("/:id/grade", verifyToken, upload.single("produceImage"), async (req
 });
 
 export default router;
-

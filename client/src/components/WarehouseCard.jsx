@@ -1,6 +1,6 @@
 ﻿import { formatDistance } from "../locationUtils";
 
-export default function WarehouseCard({ warehouse, onBook, labels }) {
+export default function WarehouseCard({ warehouse, onBook, onOpen, labels }) {
   const totalSqft = warehouse.totalSqft || warehouse.sqft || 0;
   const availableSqft = warehouse.availableSqft || 0;
   const usedPct = totalSqft ? Math.round(((totalSqft - availableSqft) / totalSqft) * 100) : 0;
@@ -13,12 +13,33 @@ export default function WarehouseCard({ warehouse, onBook, labels }) {
     match: labels?.match || "Match",
     occupancy: labels?.occupancy || "Occupancy",
     bestFor: labels?.bestFor || "Best for",
+    rating: labels?.rating || "Rating",
     distance: labels?.distance || "Distance",
+    details: labels?.details || "View Details",
     book: labels?.book || "Book This Space",
   };
 
+  const ratingCount = Number(warehouse.ratingCount || 0);
+
+  const handleOpen = () => {
+    if (onOpen) {
+      onOpen(warehouse);
+    }
+  };
+
   return (
-    <div className="card warehouse-card">
+    <div
+      className={`card warehouse-card${onOpen ? " clickable-card" : ""}`}
+      onClick={onOpen ? handleOpen : undefined}
+      onKeyDown={onOpen ? (event) => {
+        if (event.key === "Enter" || event.key === " ") {
+          event.preventDefault();
+          handleOpen();
+        }
+      } : undefined}
+      role={onOpen ? "button" : undefined}
+      tabIndex={onOpen ? 0 : undefined}
+    >
       <div className="wcard-header">
         <div style={{ display: "flex", gap: "12px", alignItems: "flex-start", flex: 1 }}>
           <div className="wcard-meta">
@@ -45,6 +66,12 @@ export default function WarehouseCard({ warehouse, onBook, labels }) {
           <div className="wcard-stat">
             <span className="wcard-stat-label">{copy.distance}</span>
             <span className="wcard-stat-value">{formatDistance(warehouse.distanceKm)}</span>
+          </div>
+        ) : null}
+        {ratingCount > 0 ? (
+          <div className="wcard-stat">
+            <span className="wcard-stat-label">{copy.rating}</span>
+            <span className="wcard-stat-value">{Number(warehouse.rating || 0).toFixed(1)}/5</span>
           </div>
         ) : null}
         {warehouse.matchScore ? (
@@ -79,11 +106,33 @@ export default function WarehouseCard({ warehouse, onBook, labels }) {
         </p>
       ) : null}
 
-      {onBook && availableSqft > 0 ? (
-        <button className="button" onClick={() => onBook(warehouse)} style={{ marginTop: "6px" }} type="button">
-          {copy.book}
-        </button>
-      ) : null}
+      <div className="booking-card-actions" style={{ marginTop: "4px" }}>
+        {onOpen ? (
+          <button
+            className="button-ghost"
+            onClick={(event) => {
+              event.stopPropagation();
+              handleOpen();
+            }}
+            type="button"
+          >
+            {copy.details}
+          </button>
+        ) : null}
+        {onBook && availableSqft > 0 ? (
+          <button
+            className="button"
+            onClick={(event) => {
+              event.stopPropagation();
+              onBook(warehouse);
+            }}
+            type="button"
+          >
+            {copy.book}
+          </button>
+        ) : null}
+      </div>
     </div>
   );
 }
+

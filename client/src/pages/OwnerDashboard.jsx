@@ -1,4 +1,4 @@
-﻿import { useEffect, useMemo, useState } from "react";
+﻿import { useEffect, useMemo, useRef, useState } from "react";
 import { createPortal } from "react-dom";
 import toast from "react-hot-toast";
 import { apiBaseUrl, getAuthHeaders } from "../firebase";
@@ -35,6 +35,23 @@ function getEnvironmentLabel(value) {
   return environmentTagOptions.find((option) => option.value === normalized)?.label || value;
 }
 
+function buildReportMailTo(booking) {
+  const subject = encodeURIComponent(`VaultX report for booking ${booking.id}`);
+  const body = encodeURIComponent(
+    [
+      `Booking ID: ${booking.id}`,
+      `Customer name: ${booking.farmerName || "N/A"}`,
+      `Customer role: ${booking.buyerRole || "N/A"}`,
+      `Customer email: ${booking.buyerEmail || "N/A"}`,
+      `Storage space: ${booking.warehouseName || "N/A"}`,
+      `Issue details:`,
+      "",
+    ].join("\n")
+  );
+
+  return `mailto:contact.aritra2006@gmail.com?subject=${subject}&body=${body}`;
+}
+
 function BookingModal({ booking, onClose, onUpdateStatus }) {
   if (!booking) {
     return null;
@@ -57,6 +74,8 @@ function BookingModal({ booking, onClose, onUpdateStatus }) {
           <div className="receipt-meta booking-details-panel" style={{ marginTop: 0, paddingTop: 0, borderTop: "none" }}>
             <div className="receipt-row"><span>Booking ID</span><strong>{booking.id}</strong></div>
             <div className="receipt-row"><span>Status</span><strong>{booking.status}</strong></div>
+            <div className="receipt-row"><span>Buyer Type</span><strong>{booking.buyerRole || "N/A"}</strong></div>
+            <div className="receipt-row"><span>Buyer Email</span><strong>{booking.buyerEmail || "N/A"}</strong></div>
             <div className="receipt-row"><span>Phone</span><strong>{booking.phone || "N/A"}</strong></div>
             <div className="receipt-row"><span>Storage Space</span><strong>{booking.warehouseName || "N/A"}</strong></div>
             <div className="receipt-row"><span>Category</span><strong>{booking.produce || booking.storageCategory || "N/A"}</strong></div>
@@ -69,6 +88,9 @@ function BookingModal({ booking, onClose, onUpdateStatus }) {
             <div className="receipt-row"><span>Start Date</span><strong>{formatDate(booking.startDate)}</strong></div>
             <div className="receipt-row"><span>Created At</span><strong>{formatDate(booking.createdAt)}</strong></div>
             <div className="receipt-row"><span>Total Price</span><strong>Rs {Number(booking.totalPrice || 0).toLocaleString("en-IN")}</strong></div>
+            {booking.buyerRating?.score ? (
+              <div className="receipt-row"><span>Buyer Rating</span><strong>{booking.buyerRating.score} / 5</strong></div>
+            ) : null}
             {Number(booking.loanEligibility || 0) > 0 ? <div className="receipt-row"><span>Loan Eligibility</span><strong>Rs {Number(booking.loanEligibility || 0).toLocaleString("en-IN")}</strong></div> : null}
             {booking.gradeResult ? (
               <>
@@ -92,16 +114,23 @@ function BookingModal({ booking, onClose, onUpdateStatus }) {
           </div>
         </div>
 
-        {booking.status === "pending" ? (
-          <div className="booking-card-actions" style={{ marginTop: "16px" }}>
-            <button className="button" onClick={() => onUpdateStatus(booking.id, "confirmed")} type="button">
-              Confirm
-            </button>
-            <button className="button-secondary button-danger" onClick={() => onUpdateStatus(booking.id, "rejected")} type="button">
-              Reject
-            </button>
-          </div>
-        ) : null}
+        <div className="booking-card-actions" style={{ marginTop: "16px" }}>
+          {booking.status === "pending" ? (
+            <>
+              <button className="button" onClick={() => onUpdateStatus(booking.id, "confirmed")} type="button">
+                Confirm
+              </button>
+              <button className="button-secondary button-danger" onClick={() => onUpdateStatus(booking.id, "rejected")} type="button">
+                Reject
+              </button>
+            </>
+          ) : null}
+          {["confirmed", "completed"].includes(booking.status) ? (
+            <a className="button-ghost" href={buildReportMailTo(booking)}>
+              Report Buyer
+            </a>
+          ) : null}
+        </div>
       </div>
     </div>,
     document.body
@@ -109,6 +138,7 @@ function BookingModal({ booking, onClose, onUpdateStatus }) {
 }
 
 export default function OwnerDashboard({ loading: sessionLoading, user }) {
+  const locationImageRef = useRef(null);
   const [activeTab, setActiveTab] = useState("listings");
   const [warehouses, setWarehouses] = useState([]);
   const [bookings, setBookings] = useState([]);
@@ -117,6 +147,8 @@ export default function OwnerDashboard({ loading: sessionLoading, user }) {
   const [saving, setSaving] = useState(false);
   const [loadingWh, setLoadingWh] = useState(true);
   const [loadingBk, setLoadingBk] = useState(false);
+  const [locationImageFile, setLocationImageFile] = useState(null);
+  const [locationImagePreview, setLocationImagePreview] = useState(null);
 
   const updateForm = (event) => {
     const { name, value } = event.target;
@@ -177,6 +209,64 @@ export default function OwnerDashboard({ loading: sessionLoading, user }) {
     })();
   }, [activeTab, sessionLoading, user]);
 
+  useEffect(() => () => {
+    if (locationImagePreview) {
+      URL.revokeObjectURL(locationImagePreview);
+    }
+  }, [locationImagePreview]);
+
+  const handleLocationImage = (nextFile) => {
+    if (!nextFile) {
+      return;
+    }
+
+    if (!nextFile.type.startsWith("image/")) {
+      toast.error("Only image files are allowed for location photos.");
+      return;
+    }
+
+    if (locationImagePreview) {
+      URL.revokeObjectURL(locationImagePreview);
+    }
+
+    setLocationImageFile(nextFile);
+    setLocationImagePreview(URL.createObjectURL(nextFile));
+  };
+
+  const uploadLocationImage = async (headers) => {
+    if (!locationImageFile) {
+      throw new Error("Upload a location image before listing the space.");
+    }
+
+    const formData = new FormData();
+    formData.append("image", locationImageFile);
+    formData.append("folder", "vaultx/listings");
+
+    const response = await fetch(`${apiBaseUrl}/api/uploads/image`, {
+      method: "POST",
+      headers,
+      body: formData,
+    });
+    const data = await response.json();
+    if (!response.ok) {
+      throw new Error(data.message || "Unable to upload location image.");
+    }
+
+    return data.asset;
+  };
+
+  const resetListingForm = () => {
+    if (locationImagePreview) {
+      URL.revokeObjectURL(locationImagePreview);
+    }
+    setForm(emptyWarehouseForm);
+    setLocationImageFile(null);
+    setLocationImagePreview(null);
+    if (locationImageRef.current) {
+      locationImageRef.current.value = "";
+    }
+  };
+
   const handleAddWarehouse = async (event) => {
     event.preventDefault();
 
@@ -190,9 +280,15 @@ export default function OwnerDashboard({ loading: sessionLoading, user }) {
       return;
     }
 
+    if (!locationImageFile) {
+      toast.error("Upload a location picture for the space.");
+      return;
+    }
+
     setSaving(true);
     try {
       const headers = await getAuthHeaders();
+      const locationImage = await uploadLocationImage(headers);
       const res = await fetch(`${apiBaseUrl}/api/warehouses`, {
         method: "POST",
         headers: {
@@ -214,12 +310,13 @@ export default function OwnerDashboard({ loading: sessionLoading, user }) {
           produces: form.supportedCategories,
           environmentTags: form.environmentTags,
           pricingUnit: form.pricingUnit,
+          locationImage,
         }),
       });
       const data = await res.json();
       if (!res.ok) throw new Error(data.message || "Unable to create listing.");
       setWarehouses((prev) => [...prev, data.warehouse]);
-      setForm(emptyWarehouseForm);
+      resetListingForm();
       toast.success("Storage space listed.");
     } catch (err) {
       toast.error(err.message);
@@ -303,6 +400,9 @@ export default function OwnerDashboard({ loading: sessionLoading, user }) {
 
                 return (
                   <div className="card" key={warehouse.id}>
+                    {warehouse.locationImage?.url ? (
+                      <img alt="Storage location" className="listing-photo" src={warehouse.locationImage.url} />
+                    ) : null}
                     <div className="wcard-header" style={{ marginBottom: "10px" }}>
                       <div style={{ display: "flex", gap: "12px", alignItems: "flex-start", flex: 1 }}>
                         <div className="wcard-icon">Space</div>
@@ -323,6 +423,7 @@ export default function OwnerDashboard({ loading: sessionLoading, user }) {
                       <div className="wcard-stat"><span className="wcard-stat-label">Total</span><span className="wcard-stat-value">{warehouse.sqft} sq ft</span></div>
                       <div className="wcard-stat"><span className="wcard-stat-label">Height</span><span className="wcard-stat-value">{warehouse.heightFt || 10} ft</span></div>
                       <div className="wcard-stat"><span className="wcard-stat-label">Pricing</span><span className="wcard-stat-value">Rs {warehouse.pricePerSqft}/{warehouse.pricingUnit || "month"}</span></div>
+                      {Number(warehouse.ratingCount || 0) > 0 ? <div className="wcard-stat"><span className="wcard-stat-label">Rating</span><span className="wcard-stat-value">{Number(warehouse.rating || 0).toFixed(1)}/5</span></div> : null}
                     </div>
                     {categories.length ? (
                       <div className="listing-detail-block">
@@ -451,6 +552,28 @@ export default function OwnerDashboard({ loading: sessionLoading, user }) {
                 </div>
               </fieldset>
 
+              <div className="field">
+                <span>Location Picture</span>
+                <div className="upload-zone owner-upload-zone" onClick={() => locationImageRef.current?.click()}>
+                  {locationImagePreview ? (
+                    <img alt="Location preview" className="upload-preview-image" src={locationImagePreview} />
+                  ) : (
+                    <>
+                      <span className="upload-zone-icon">Upload</span>
+                      <p style={{ fontWeight: 700, margin: 0 }}>Add a clear photo of the space</p>
+                      <p style={{ fontSize: "0.8rem", margin: 0 }}>This image will be shown to farmers and businesses.</p>
+                    </>
+                  )}
+                  <input
+                    accept=".png,.jpg,.jpeg,image/png,image/jpeg"
+                    onChange={(event) => handleLocationImage(event.target.files?.[0])}
+                    ref={locationImageRef}
+                    style={{ display: "none" }}
+                    type="file"
+                  />
+                </div>
+              </div>
+
               <button className="button" disabled={saving} type="submit" style={{ marginTop: "4px" }}>
                 {saving ? "Saving..." : "List Space"}
               </button>
@@ -480,6 +603,7 @@ export default function OwnerDashboard({ loading: sessionLoading, user }) {
                     <div>
                       <p className="booking-card-title">{booking.farmerName || "Customer"} - {booking.warehouseName || "Storage Space"}</p>
                       <div className="booking-card-meta">
+                        <span>{booking.buyerRole || "customer"}</span>
                         <span>{booking.produce || booking.storageCategory || "general goods"}</span>
                         <span>{booking.weight || booking.sqft || 0}</span>
                         <span>{booking.stackable ? "Stackable" : "Non-stackable"}</span>
@@ -493,12 +617,19 @@ export default function OwnerDashboard({ loading: sessionLoading, user }) {
                   </div>
                 </button>
 
-                {booking.status === "pending" ? (
-                  <div className="booking-card-actions">
-                    <button className="button" onClick={() => updateBookingStatus(booking.id, "confirmed")} type="button">Confirm</button>
-                    <button className="button-secondary button-danger" onClick={() => updateBookingStatus(booking.id, "rejected")} type="button">Reject</button>
-                  </div>
-                ) : null}
+                <div className="booking-card-actions">
+                  {booking.status === "pending" ? (
+                    <>
+                      <button className="button" onClick={() => updateBookingStatus(booking.id, "confirmed")} type="button">Confirm</button>
+                      <button className="button-secondary button-danger" onClick={() => updateBookingStatus(booking.id, "rejected")} type="button">Reject</button>
+                    </>
+                  ) : null}
+                  {["confirmed", "completed"].includes(booking.status) ? (
+                    <a className="button-ghost" href={buildReportMailTo(booking)}>
+                      Report Buyer
+                    </a>
+                  ) : null}
+                </div>
               </article>
             ))
           )}
