@@ -1,8 +1,10 @@
 ﻿import { useEffect, useMemo, useRef, useState } from "react";
+import { useTranslation } from "react-i18next";
 import { createPortal } from "react-dom";
 import toast from "react-hot-toast";
 import { apiBaseUrl, getAuthHeaders } from "../firebase";
 import { extractGpsFromFile } from "../exifGps";
+import OwnerListingForm from "../components/OwnerListingForm";
 import { getCategoryLabel, supportedStorageCategories } from "../storageMath";
 import { environmentTagOptions } from "../storageRules";
 
@@ -60,20 +62,56 @@ function buildReportMailTo(booking) {
 function BookingModal({ booking, onClose, onUpdateStatus }) {
   const [quotedPrice, setQuotedPrice] = useState("");
   const [ownerResponseNote, setOwnerResponseNote] = useState("");
+  const [submitting, setSubmitting] = useState(false);
 
   useEffect(() => {
     if (!booking) {
       setQuotedPrice("");
       setOwnerResponseNote("");
+      setSubmitting(false);
       return;
     }
     setQuotedPrice(String(booking.totalPrice || ""));
     setOwnerResponseNote(booking.ownerResponseNote || "");
+    setSubmitting(false);
   }, [booking]);
 
   if (!booking) {
     return null;
   }
+
+  const handleConfirm = async () => {
+    const nextPrice = String(quotedPrice || booking.totalPrice || "").trim();
+    if (!nextPrice) {
+      toast.error("Enter a final price before confirming.");
+      return;
+    }
+
+    setSubmitting(true);
+    try {
+      const updatedBooking = await onUpdateStatus(booking.id, "confirmed", {
+        totalPrice: nextPrice,
+        ownerResponseNote,
+      });
+      if (updatedBooking) {
+        onClose();
+      }
+    } finally {
+      setSubmitting(false);
+    }
+  };
+
+  const handleReject = async () => {
+    setSubmitting(true);
+    try {
+      const updatedBooking = await onUpdateStatus(booking.id, "rejected", { ownerResponseNote });
+      if (updatedBooking) {
+        onClose();
+      }
+    } finally {
+      setSubmitting(false);
+    }
+  };
 
   return createPortal(
     <div className="modal-backdrop" onClick={onClose} role="presentation">
@@ -83,7 +121,7 @@ function BookingModal({ booking, onClose, onUpdateStatus }) {
             <p className="eyebrow">Booking Details</p>
             <h3 style={{ margin: 0 }}>{booking.farmerName || "Customer"}</h3>
           </div>
-          <button className="button-ghost" onClick={onClose} type="button">
+          <button className="button-ghost" disabled={submitting} onClick={onClose} type="button">
             Close
           </button>
         </div>
@@ -92,7 +130,6 @@ function BookingModal({ booking, onClose, onUpdateStatus }) {
           <div className="receipt-meta booking-details-panel" style={{ marginTop: 0, paddingTop: 0, borderTop: "none" }}>
             <div className="receipt-row"><span>Booking ID</span><strong>{booking.id}</strong></div>
             <div className="receipt-row"><span>Status</span><strong>{booking.status}</strong></div>
-            {/* Doc 1: buyer role & email */}
             <div className="receipt-row"><span>Buyer Type</span><strong>{booking.buyerRole || "N/A"}</strong></div>
             <div className="receipt-row"><span>Buyer Email</span><strong>{booking.buyerEmail || "N/A"}</strong></div>
             <div className="receipt-row"><span>Phone</span><strong>{booking.phone || "N/A"}</strong></div>
@@ -107,14 +144,11 @@ function BookingModal({ booking, onClose, onUpdateStatus }) {
             <div className="receipt-row"><span>Start Date</span><strong>{formatDate(booking.startDate)}</strong></div>
             <div className="receipt-row"><span>Created At</span><strong>{formatDate(booking.createdAt)}</strong></div>
             <div className="receipt-row"><span>Total Price</span><strong>Rs {Number(booking.totalPrice || 0).toLocaleString("en-IN")}</strong></div>
-            {/* Doc 2: original price when owner has negotiated */}
             {Number(booking.originalTotalPrice || 0) > 0 && Number(booking.originalTotalPrice) !== Number(booking.totalPrice || 0) ? (
               <div className="receipt-row"><span>Original Price</span><strong>Rs {Number(booking.originalTotalPrice).toLocaleString("en-IN")}</strong></div>
             ) : null}
-            {/* Doc 2: notes */}
             {booking.bookerNote ? <div className="receipt-row"><span>Booker Note</span><strong>{booking.bookerNote}</strong></div> : null}
             {booking.ownerResponseNote ? <div className="receipt-row"><span>Owner Reply</span><strong>{booking.ownerResponseNote}</strong></div> : null}
-            {/* Doc 1: buyer rating */}
             {booking.buyerRating?.score ? (
               <div className="receipt-row"><span>Buyer Rating</span><strong>{booking.buyerRating.score} / 5</strong></div>
             ) : null}
@@ -143,7 +177,6 @@ function BookingModal({ booking, onClose, onUpdateStatus }) {
           </div>
         </div>
 
-        {/* Doc 2: price negotiation + reply note when pending */}
         {booking.status === "pending" ? (
           <div style={{ display: "grid", gap: "12px", marginTop: "16px" }}>
             <label>
@@ -166,31 +199,17 @@ function BookingModal({ booking, onClose, onUpdateStatus }) {
               />
             </label>
             <div className="booking-card-actions" style={{ marginTop: 0 }}>
-              <button
-                className="button"
-                onClick={() =>
-                  onUpdateStatus(booking.id, "confirmed", {
-                    totalPrice: quotedPrice,
-                    ownerResponseNote,
-                  })
-                }
-                type="button"
-              >
-                Confirm
+              <button className="button" disabled={submitting} onClick={handleConfirm} type="button">
+                {submitting ? "Confirming..." : "Confirm"}
               </button>
-              <button
-                className="button-secondary button-danger"
-                onClick={() => onUpdateStatus(booking.id, "rejected", { ownerResponseNote })}
-                type="button"
-              >
+              <button className="button-secondary button-danger" disabled={submitting} onClick={handleReject} type="button">
                 Reject
               </button>
             </div>
           </div>
         ) : null}
 
-        {/* Doc 1: report buyer link for confirmed / completed bookings */}
-        {["confirmed", "completed"].includes(booking.status) ? (
+        { ["confirmed", "completed"].includes(booking.status) ? (
           <div className="booking-card-actions" style={{ marginTop: "16px" }}>
             <a className="button-ghost" href={buildReportMailTo(booking)}>
               Report Buyer
@@ -204,13 +223,14 @@ function BookingModal({ booking, onClose, onUpdateStatus }) {
 }
 
 export default function OwnerDashboard({ loading: sessionLoading, user }) {
+  const { t } = useTranslation("owner");
   // Doc 1: refs & geotag state for location image upload
   const locationImageRef = useRef(null);
   const [locationImageFile, setLocationImageFile] = useState(null);
   const [locationImagePreview, setLocationImagePreview] = useState(null);
   const [geotagMode, setGeotagMode] = useState("pending");
   const [geotagLoading, setGeotagLoading] = useState(false);
-  const [geotagMessage, setGeotagMessage] = useState("Upload a geotagged image to auto-detect the location.");
+  const [geotagMessage, setGeotagMessage] = useState(t("form.geotagUploadHint"));
 
   const [activeTab, setActiveTab] = useState("listings");
   const [warehouses, setWarehouses] = useState([]);
@@ -220,6 +240,12 @@ export default function OwnerDashboard({ loading: sessionLoading, user }) {
   const [saving, setSaving] = useState(false);
   const [loadingWh, setLoadingWh] = useState(true);
   const [loadingBk, setLoadingBk] = useState(false);
+
+  useEffect(() => {
+    if (geotagMode === "pending") {
+      setGeotagMessage(t("form.geotagUploadHint"));
+    }
+  }, [geotagMode, t]);
 
   const updateForm = (event) => {
     const { name, value } = event.target;
@@ -248,11 +274,12 @@ export default function OwnerDashboard({ loading: sessionLoading, user }) {
         const headers = await getAuthHeaders();
         const res = await fetch(`${apiBaseUrl}/api/warehouses/owner/${user.uid}`, { headers });
         const data = await res.json();
-        if (!res.ok) throw new Error(data.message || "Unable to load listings.");
+        if (!res.ok) throw new Error(data.message || t("toast.loadListingsFailed"));
         setWarehouses(data.warehouses || []);
       } catch (err) {
         toast.error(err.message);
-      } finally {
+      return null;
+    } finally {
         setLoadingWh(false);
       }
     })();
@@ -268,11 +295,12 @@ export default function OwnerDashboard({ loading: sessionLoading, user }) {
         const headers = await getAuthHeaders();
         const res = await fetch(`${apiBaseUrl}/api/bookings/owner/${user.uid}`, { headers });
         const data = await res.json();
-        if (!res.ok) throw new Error(data.message || "Unable to load bookings.");
+        if (!res.ok) throw new Error(data.message || t("toast.loadBookingsFailed"));
         setBookings(data.bookings || []);
       } catch (err) {
         toast.error(err.message);
-      } finally {
+      return null;
+    } finally {
         setLoadingBk(false);
       }
     })();
@@ -291,7 +319,7 @@ export default function OwnerDashboard({ loading: sessionLoading, user }) {
     if (!nextFile) return;
 
     if (!nextFile.type.startsWith("image/")) {
-      toast.error("Only image files are allowed for location photos.");
+      toast.error(t("toast.imageOnly"));
       return;
     }
 
@@ -300,7 +328,7 @@ export default function OwnerDashboard({ loading: sessionLoading, user }) {
     setLocationImageFile(nextFile);
     setLocationImagePreview(URL.createObjectURL(nextFile));
     setGeotagLoading(true);
-    setGeotagMessage("Checking the image for GPS metadata...");
+    setGeotagMessage(t("form.geotagChecking"));
 
     try {
       const gpsCoordinates = await extractGpsFromFile(nextFile);
@@ -311,20 +339,20 @@ export default function OwnerDashboard({ loading: sessionLoading, user }) {
           lng: String(gpsCoordinates.lng),
         }));
         setGeotagMode("auto");
-        setGeotagMessage(`Location found in image metadata: ${gpsCoordinates.lat}, ${gpsCoordinates.lng}.`);
-        toast.success("Geotag found. Coordinates filled automatically.");
+        setGeotagMessage(t("form.geotagFound", { lat: gpsCoordinates.lat, lng: gpsCoordinates.lng }));
+        toast.success(t("toast.geotagFound"));
         return;
       }
 
       setForm((current) => ({ ...current, lat: "", lng: "" }));
       setGeotagMode("manual");
-      setGeotagMessage("No geotag was found in this image. Enter latitude and longitude manually.");
-      toast("No geotag found. Enter coordinates manually.");
+      setGeotagMessage(t("form.geotagMissing"));
+      toast(t("toast.geotagMissing"));
     } catch (_error) {
       setForm((current) => ({ ...current, lat: "", lng: "" }));
       setGeotagMode("manual");
-      setGeotagMessage("Could not read GPS metadata from the image. Enter latitude and longitude manually.");
-      toast("Could not read geotag. Enter coordinates manually.");
+      setGeotagMessage(t("form.geotagError"));
+      toast(t("toast.geotagError"));
     } finally {
       setGeotagLoading(false);
     }
@@ -333,7 +361,7 @@ export default function OwnerDashboard({ loading: sessionLoading, user }) {
   // Doc 1: upload location image to server, return asset
   const uploadLocationImage = async (headers) => {
     if (!locationImageFile) {
-      throw new Error("Upload a location image before listing the space.");
+      throw new Error(t("toast.uploadBeforeListing"));
     }
 
     const formData = new FormData();
@@ -346,7 +374,7 @@ export default function OwnerDashboard({ loading: sessionLoading, user }) {
       body: formData,
     });
     const data = await response.json();
-    if (!response.ok) throw new Error(data.message || "Unable to upload location image.");
+    if (!response.ok) throw new Error(data.message || t("toast.uploadFailed"));
     return data.asset;
   };
 
@@ -358,7 +386,7 @@ export default function OwnerDashboard({ loading: sessionLoading, user }) {
     setLocationImagePreview(null);
     setGeotagMode("pending");
     setGeotagLoading(false);
-    setGeotagMessage("Upload a geotagged image to auto-detect the location.");
+    setGeotagMessage(t("form.geotagUploadHint"));
     if (locationImageRef.current) locationImageRef.current.value = "";
   };
 
@@ -367,19 +395,19 @@ export default function OwnerDashboard({ loading: sessionLoading, user }) {
     event.preventDefault();
 
     if (!form.supportedCategories.length) {
-      toast.error("Select at least one supported category.");
+      toast.error(t("toast.selectCategory"));
       return;
     }
     if (!form.environmentTags.length) {
-      toast.error("Select at least one environment tag.");
+      toast.error(t("toast.selectEnvironment"));
       return;
     }
     if (!locationImageFile) {
-      toast.error("Upload a location picture for the space.");
+      toast.error(t("toast.uploadPicture"));
       return;
     }
     if (!form.lat || !form.lng) {
-      toast.error("Add latitude and longitude — use a geotagged photo or enter them manually.");
+      toast.error(t("toast.addCoordinates"));
       return;
     }
 
@@ -410,12 +438,13 @@ export default function OwnerDashboard({ loading: sessionLoading, user }) {
         }),
       });
       const data = await res.json();
-      if (!res.ok) throw new Error(data.message || "Unable to create listing.");
+      if (!res.ok) throw new Error(data.message || t("toast.createFailed"));
       setWarehouses((prev) => [...prev, data.warehouse]);
       resetListingForm();
-      toast.success("Storage space listed.");
+      toast.success(t("toast.listed"));
     } catch (err) {
       toast.error(err.message);
+      return null;
     } finally {
       setSaving(false);
     }
@@ -440,8 +469,10 @@ export default function OwnerDashboard({ loading: sessionLoading, user }) {
         current?.id === bookingId ? data.booking : current
       );
       toast.success(`Booking ${status}.`);
+      return data.booking;
     } catch (err) {
       toast.error(err.message);
+      return null;
     }
   };
 
@@ -460,8 +491,8 @@ export default function OwnerDashboard({ loading: sessionLoading, user }) {
     <main className="page fade-up dashboard-theme dashboard-theme-owner">
       <div className="dashboard-hero dashboard-hero-business">
         <div>
-          <p className="eyebrow">Owner Dashboard</p>
-          <h2 style={{ margin: 0 }}>Manage listings and review incoming bookings</h2>
+          <p className="eyebrow">{t("dashboard.eyebrow")}</p>
+          <h2 style={{ margin: 0 }}>{t("dashboard.title")}</h2>
         </div>
         <div className="tab-strip">
           <button
@@ -469,7 +500,7 @@ export default function OwnerDashboard({ loading: sessionLoading, user }) {
             onClick={() => setActiveTab("listings")}
             type="button"
           >
-            My Listings
+            {t("dashboard.listings")}
             {warehouses.length > 0 ? (
               <span className="badge badge-muted dashboard-count-chip">{warehouses.length}</span>
             ) : null}
@@ -479,7 +510,7 @@ export default function OwnerDashboard({ loading: sessionLoading, user }) {
             onClick={() => setActiveTab("bookings")}
             type="button"
           >
-            Bookings
+            {t("dashboard.bookings")}
             {pendingCount > 0 ? (
               <span className="badge status-pending dashboard-count-chip">{pendingCount}</span>
             ) : null}
@@ -492,7 +523,7 @@ export default function OwnerDashboard({ loading: sessionLoading, user }) {
           {/* Left column: listing cards */}
           <div style={{ display: "grid", gap: "16px", alignContent: "start" }}>
             <p className="section-subtitle">
-              {loadingWh ? "Loading listings..." : `${warehouses.length} space${warehouses.length !== 1 ? "s" : ""} listed`}
+              {loadingWh ? t("dashboard.loadingListings") : t("dashboard.listedCount", { count: warehouses.length })}
             </p>
 
             {loadingWh ? (
@@ -533,9 +564,12 @@ export default function OwnerDashboard({ loading: sessionLoading, user }) {
                           </p>
                         </div>
                       </div>
+                      <div style={{ display: "grid", gap: "8px", justifyItems: "end" }}>
+                      <span className="listing-price-pill">Rs {Number(warehouse.pricePerSqft || 0).toLocaleString("en-IN")}/{warehouse.pricingUnit || "month"}</span>
                       <span className={warehouse.availableSqft > 0 ? "badge status-confirmed" : "badge status-rejected"}>
                         {warehouse.availableSqft > 0 ? "Active" : "Full"}
                       </span>
+                    </div>
                     </div>
 
                     <div className="wcard-stats">
@@ -576,148 +610,19 @@ export default function OwnerDashboard({ loading: sessionLoading, user }) {
             )}
           </div>
 
-          {/* Right column: add listing form */}
-          <div className="card">
-            <p className="eyebrow">List a Space</p>
-            <h3 style={{ marginBottom: "1rem" }}>Add new storage inventory</h3>
-            <form className="form-grid" onSubmit={handleAddWarehouse}>
-              <label>
-                Space Name
-                <input name="name" onChange={updateForm} placeholder="e.g. Shop Basement near Market Road" required value={form.name} />
-              </label>
-              <label>
-                Full Address
-                <input name="address" onChange={updateForm} placeholder="Street, City, State" required value={form.address} />
-              </label>
-              <div className="form-row">
-                <label>
-                  Pincode
-                  <input name="pincode" onChange={updateForm} placeholder="700001" required value={form.pincode} />
-                </label>
-                <label>
-                  Space Type
-                  <select name="spaceType" onChange={updateForm} value={form.spaceType}>
-                    <option value="spare room">Spare room</option>
-                    <option value="garage">Garage / shed</option>
-                    <option value="shop basement">Shop basement</option>
-                    <option value="godown">Godown</option>
-                    <option value="warehouse bay">Warehouse bay</option>
-                  </select>
-                </label>
-              </div>
-              <div className="form-row">
-                <label>
-                  Total Sq Ft
-                  <input name="totalSqft" onChange={updateForm} placeholder="5000" required type="number" value={form.totalSqft} />
-                </label>
-                <label>
-                  Available Sq Ft
-                  <input name="availableSqft" onChange={updateForm} placeholder="3000" required type="number" value={form.availableSqft} />
-                </label>
-              </div>
-              <div className="form-row">
-                <label>
-                  Clear Height (ft)
-                  <input name="heightFt" onChange={updateForm} placeholder="10" required step="0.1" type="number" value={form.heightFt} />
-                </label>
-                <label>
-                  Price per Sq Ft
-                  <input name="pricePerSqft" onChange={updateForm} placeholder="12" required step="0.1" type="number" value={form.pricePerSqft} />
-                </label>
-              </div>
-              <label>
-                Pricing Unit
-                <select name="pricingUnit" onChange={updateForm} value={form.pricingUnit}>
-                  <option value="daily">Daily</option>
-                  <option value="weekly">Weekly</option>
-                  <option value="monthly">Monthly</option>
-                </select>
-              </label>
-
-              <fieldset className="field option-fieldset">
-                <legend>Supported Categories</legend>
-                <p className="field-hint">Pick the categories this space can safely store.</p>
-                <div className="option-grid">
-                  {supportedStorageCategories.map((category) => (
-                    <label className="checkbox-item option-card" key={category}>
-                      <input
-                        checked={form.supportedCategories.includes(category)}
-                        onChange={() => toggleMultiSelect("supportedCategories", category)}
-                        type="checkbox"
-                      />
-                      <span>{getCategoryLabel(category)}</span>
-                    </label>
-                  ))}
-                </div>
-              </fieldset>
-
-              <fieldset className="field option-fieldset">
-                <legend>Environment Tags</legend>
-                <p className="field-hint">Add the conditions buyers can expect in this space.</p>
-                <div className="option-grid">
-                  {environmentTagOptions.map((option) => (
-                    <label className="checkbox-item option-card" key={option.value}>
-                      <input
-                        checked={form.environmentTags.includes(option.value)}
-                        onChange={() => toggleMultiSelect("environmentTags", option.value)}
-                        type="checkbox"
-                      />
-                      <span>{option.label}</span>
-                    </label>
-                  ))}
-                </div>
-              </fieldset>
-
-              {/* Doc 1: geotagged location image upload */}
-              <div className="field">
-                <span>Location Picture</span>
-                <div className="upload-zone owner-upload-zone" onClick={() => locationImageRef.current?.click()}>
-                  {locationImagePreview ? (
-                    <img alt="Location preview" className="upload-preview-image" src={locationImagePreview} />
-                  ) : (
-                    <>
-                      <span className="upload-zone-icon">Upload</span>
-                      <p style={{ fontWeight: 700, margin: 0 }}>Add a clear photo of the space</p>
-                      <p style={{ fontSize: "0.8rem", margin: 0 }}>We will try to read GPS from the image first.</p>
-                    </>
-                  )}
-                  <input
-                    accept=".png,.jpg,.jpeg,image/png,image/jpeg"
-                    onChange={(event) => handleLocationImage(event.target.files?.[0])}
-                    ref={locationImageRef}
-                    style={{ display: "none" }}
-                    type="file"
-                  />
-                </div>
-                <p className="field-hint">{geotagLoading ? "Checking geotag..." : geotagMessage}</p>
-              </div>
-
-              {/* Doc 1: show detected coordinates */}
-              {geotagMode === "auto" ? (
-                <div className="auto-coordinate-note">
-                  Detected coordinates: {form.lat}, {form.lng}
-                </div>
-              ) : null}
-
-              {/* Doc 1: manual coordinate entry fallback */}
-              {geotagMode === "manual" ? (
-                <div className="form-row">
-                  <label>
-                    Latitude
-                    <input name="lat" onChange={updateForm} placeholder="22.5726" required step="any" type="number" value={form.lat} />
-                  </label>
-                  <label>
-                    Longitude
-                    <input name="lng" onChange={updateForm} placeholder="88.3639" required step="any" type="number" value={form.lng} />
-                  </label>
-                </div>
-              ) : null}
-
-              <button className="button" disabled={saving} style={{ marginTop: "4px" }} type="submit">
-                {saving ? "Saving..." : "List Space"}
-              </button>
-            </form>
-          </div>
+          <OwnerListingForm
+            form={form}
+            geotagLoading={geotagLoading}
+            geotagMessage={geotagMessage}
+            geotagMode={geotagMode}
+            handleAddWarehouse={handleAddWarehouse}
+            handleLocationImage={handleLocationImage}
+            locationImagePreview={locationImagePreview}
+            locationImageRef={locationImageRef}
+            saving={saving}
+            toggleMultiSelect={toggleMultiSelect}
+            updateForm={updateForm}
+          />
         </section>
       ) : (
         // Bookings tab
@@ -802,3 +707,14 @@ export default function OwnerDashboard({ loading: sessionLoading, user }) {
     </main>
   );
 }
+
+
+
+
+
+
+
+
+
+
+

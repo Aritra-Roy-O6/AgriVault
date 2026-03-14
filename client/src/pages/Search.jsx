@@ -1,4 +1,4 @@
-﻿import { useEffect, useMemo, useState } from "react";
+import { useEffect, useMemo, useState } from "react";
 import { useNavigate, useSearchParams } from "react-router-dom";
 import toast from "react-hot-toast";
 import ListingModal from "../components/ListingModal";
@@ -6,7 +6,8 @@ import MapView from "../components/MapView";
 import WarehouseCard from "../components/WarehouseCard";
 import { apiBaseUrl } from "../firebase";
 import { attachDistance, hasCoordinates, sortByDistance, withinRadius } from "../locationUtils";
-import { defaultCategories, environmentTagOptions, scoreWarehouseMatch } from "../storageRules";
+import { environmentTagOptions, scoreWarehouseMatch } from "../storageRules";
+import { getCategoryLabel, supportedStorageCategories } from "../storageMath";
 
 const RADIUS_OPTIONS = [10, 25, 50, 100, 250];
 
@@ -16,6 +17,17 @@ function normalizeEnvironmentValue(value) {
     .toLowerCase()
     .replace(/\s+/g, "-")
     .replace("cool", "cold");
+}
+
+function normalizeCategoryValue(value) {
+  return String(value || "").trim().toLowerCase();
+}
+
+function parseMultiValue(value) {
+  return String(value || "")
+    .split(",")
+    .map((item) => item.trim().toLowerCase())
+    .filter(Boolean);
 }
 
 export default function Search() {
@@ -29,9 +41,9 @@ export default function Search() {
   const [locationError, setLocationError] = useState("");
   const [selectedWarehouse, setSelectedWarehouse] = useState(null);
   const [filters, setFilters] = useState({
-    query: searchParams.get("query") || "",
+    categories: parseMultiValue(searchParams.get("query")),
     location: searchParams.get("location") || "",
-    environment: searchParams.get("environment") || "",
+    environments: parseMultiValue(searchParams.get("environment")),
     minSqft: searchParams.get("minSqft") || "",
     maxPrice: searchParams.get("maxPrice") || "",
   });
@@ -52,11 +64,32 @@ export default function Search() {
     })();
   }, []);
 
+  const toggleFilterValue = (field, value) => {
+    setFilters((current) => {
+      const values = current[field] || [];
+      const normalizedValue = field === "environments" ? normalizeEnvironmentValue(value) : normalizeCategoryValue(value);
+      return {
+        ...current,
+        [field]: values.includes(normalizedValue)
+          ? values.filter((item) => item !== normalizedValue)
+          : [...values, normalizedValue],
+      };
+    });
+  };
+
+  const clearMultiFilters = () => {
+    setFilters((current) => ({
+      ...current,
+      categories: [],
+      environments: [],
+    }));
+  };
+
   const scoredListings = useMemo(() => {
     const withDistance = attachDistance(warehouses, buyerLocation);
     const filtered = withDistance
       .map((warehouse) => {
-        const match = scoreWarehouseMatch(warehouse, filters.query, filters.location);
+        const match = scoreWarehouseMatch(warehouse, filters.categories[0] || "", filters.location);
         return {
           ...warehouse,
           matchScore: match.score,
@@ -64,24 +97,24 @@ export default function Search() {
         };
       })
       .filter((warehouse) => {
-        const matchesQuery = !filters.query || [warehouse.supportedCategories, warehouse.produces]
+        const listingCategories = [warehouse.supportedCategories, warehouse.produces]
           .flat()
-          .filter(Boolean)
-          .join(" ")
-          .toLowerCase()
-          .includes(filters.query.toLowerCase());
+          .map(normalizeCategoryValue)
+          .filter(Boolean);
+        const listingEnvironment = (warehouse.environmentTags || [])
+          .map(normalizeEnvironmentValue)
+          .filter(Boolean);
+        const matchesCategory = !filters.categories.length || filters.categories.some((category) => listingCategories.includes(category));
         const matchesLocation = !filters.location || [warehouse.address, warehouse.pincode, warehouse.name]
           .filter(Boolean)
           .join(" ")
           .toLowerCase()
           .includes(filters.location.toLowerCase());
-        const matchesEnvironment = !filters.environment || (warehouse.environmentTags || [])
-          .map(normalizeEnvironmentValue)
-          .includes(normalizeEnvironmentValue(filters.environment));
+        const matchesEnvironment = !filters.environments.length || filters.environments.some((environment) => listingEnvironment.includes(environment));
         const matchesSqft = !filters.minSqft || Number(warehouse.availableSqft || 0) >= Number(filters.minSqft);
         const matchesPrice = !filters.maxPrice || Number(warehouse.pricePerSqft || 0) <= Number(filters.maxPrice);
         const matchesRadius = !hasCoordinates(buyerLocation) || withinRadius(warehouse.distanceKm, radiusKm);
-        return matchesQuery && matchesLocation && matchesEnvironment && matchesSqft && matchesPrice && matchesRadius;
+        return matchesCategory && matchesLocation && matchesEnvironment && matchesSqft && matchesPrice && matchesRadius;
       });
 
     return hasCoordinates(buyerLocation)
@@ -133,11 +166,11 @@ export default function Search() {
   };
 
   return (
-    <main className="page fade-up">
-      <section className="card">
+    <main className="page fade-up search-shell">
+      <section className="card card-compact">
         <p className="eyebrow">Search</p>
-        <h2>Find storage that fits your goods</h2>
-        <div className="buyer-location-controls" style={{ marginBottom: "16px" }}>
+        <h2 style={{ marginBottom: "1rem" }}>Find storage that fits your goods</h2>
+        <div className="search-toolbar-grid">
           <label className="field">
             Radius
             <select onChange={(event) => setRadiusKm(event.target.value)} value={radiusKm}>
@@ -146,7 +179,7 @@ export default function Search() {
               ))}
             </select>
           </label>
-          <div className="actions">
+          <div className="actions compact-actions-row">
             <button className="button-secondary" disabled={locationLoading} onClick={requestBuyerLocation} type="button">
               {locationLoading ? "Locating..." : "Use My Location"}
             </button>
@@ -163,21 +196,58 @@ export default function Search() {
             {locationError ? <span className="location-error-text"> {locationError}</span> : null}
           </div>
         </div>
-        <div className="search-filter-grid">
-          <label>
-            Storage category
-            <input
-              list="storage-categories"
-              onChange={(event) => setFilters((current) => ({ ...current, query: event.target.value }))}
-              placeholder="clothes, grains, electronics"
-              value={filters.query}
-            />
-            <datalist id="storage-categories">
-              {defaultCategories.map((category) => (
-                <option key={category} value={category} />
-              ))}
-            </datalist>
-          </label>
+
+        <div className="search-filter-grid compact-search-grid search-filter-grid-multiselect">
+          <fieldset className="field option-fieldset search-filter-span-two">
+            <legend>Storage categories</legend>
+            <div className="filter-group-header">
+              <p className="field-hint">Choose one or more categories that match the goods you want to store.</p>
+              {filters.categories.length ? (
+                <span className="filter-count-chip">{filters.categories.length} selected</span>
+              ) : null}
+            </div>
+            <div className="option-grid filter-option-grid">
+              {supportedStorageCategories.map((category) => {
+                const checked = filters.categories.includes(category);
+                return (
+                  <label className={`checkbox-item option-card filter-option-card${checked ? " active" : ""}`} key={category}>
+                    <input
+                      checked={checked}
+                      onChange={() => toggleFilterValue("categories", category)}
+                      type="checkbox"
+                    />
+                    <span>{getCategoryLabel(category)}</span>
+                  </label>
+                );
+              })}
+            </div>
+          </fieldset>
+
+          <fieldset className="field option-fieldset search-filter-span-two">
+            <legend>Environment tags</legend>
+            <div className="filter-group-header">
+              <p className="field-hint">Pick all storage conditions the space should support.</p>
+              {filters.environments.length ? (
+                <span className="filter-count-chip">{filters.environments.length} selected</span>
+              ) : null}
+            </div>
+            <div className="option-grid filter-option-grid">
+              {environmentTagOptions.map((option) => {
+                const checked = filters.environments.includes(option.value);
+                return (
+                  <label className={`checkbox-item option-card filter-option-card${checked ? " active" : ""}`} key={option.value}>
+                    <input
+                      checked={checked}
+                      onChange={() => toggleFilterValue("environments", option.value)}
+                      type="checkbox"
+                    />
+                    <span>{option.label}</span>
+                  </label>
+                );
+              })}
+            </div>
+          </fieldset>
+
           <label>
             Location
             <input
@@ -187,19 +257,11 @@ export default function Search() {
             />
           </label>
           <label>
-            Environment
-            <select onChange={(event) => setFilters((current) => ({ ...current, environment: event.target.value }))} value={filters.environment}>
-              <option value="">Any</option>
-              {environmentTagOptions.map((option) => (
-                <option key={option.value} value={option.value}>{option.label}</option>
-              ))}
-            </select>
-          </label>
-          <label>
             Minimum sq ft
             <input
               min="0"
               onChange={(event) => setFilters((current) => ({ ...current, minSqft: event.target.value }))}
+              placeholder="250"
               type="number"
               value={filters.minSqft}
             />
@@ -209,15 +271,34 @@ export default function Search() {
             <input
               min="0"
               onChange={(event) => setFilters((current) => ({ ...current, maxPrice: event.target.value }))}
+              placeholder="120"
               type="number"
               value={filters.maxPrice}
             />
           </label>
         </div>
+
+        {filters.categories.length || filters.environments.length ? (
+          <div className="filter-selection-bar">
+            <div className="chip-row">
+              {filters.categories.map((category) => (
+                <span className="chip" key={category}>{getCategoryLabel(category)}</span>
+              ))}
+              {filters.environments.map((environment) => (
+                <span className="check-chip" key={environment}>
+                  {environmentTagOptions.find((option) => option.value === environment)?.label || environment}
+                </span>
+              ))}
+            </div>
+            <button className="button-ghost" onClick={clearMultiFilters} type="button">
+              Clear category and environment filters
+            </button>
+          </div>
+        ) : null}
       </section>
 
-      <section className="page two-column">
-        <div style={{ display: "grid", gap: "16px", alignContent: "start" }}>
+      <section className="page search-results-layout">
+        <div style={{ display: "grid", gap: "14px", alignContent: "start" }}>
           <p className="section-subtitle">
             {loading
               ? "Loading matching spaces..."
@@ -249,7 +330,7 @@ export default function Search() {
           )}
         </div>
 
-        <div className="card" style={{ padding: 0, overflow: "hidden" }}>
+        <div className="card sticky-map-card" style={{ padding: 0, overflow: "hidden" }}>
           <MapView buyerLocation={buyerLocation} warehouses={scoredListings} />
         </div>
       </section>

@@ -1,4 +1,9 @@
 ﻿import { formatDistance } from "../locationUtils";
+import { getCategoryLabel } from "../storageMath";
+
+function formatMoney(value) {
+  return `Rs ${Number(value || 0).toLocaleString("en-IN", { maximumFractionDigits: 2 })}`;
+}
 
 export default function WarehouseCard({ warehouse, onBook, onOpen, labels }) {
   const totalSqft = warehouse.totalSqft || warehouse.sqft || 0;
@@ -50,7 +55,7 @@ export default function WarehouseCard({ warehouse, onBook, onOpen, labels }) {
             </p>
           </div>
         </div>
-        {availableSqft > 0 ? <span className="badge status-confirmed">{copy.available}</span> : <span className="badge status-rejected">{copy.full}</span>}
+        <div style={{ display: "grid", gap: "8px", justifyItems: "end" }}><span className="listing-price-pill">{formatMoney(warehouse.pricePerSqft)}/{warehouse.pricingUnit || "month"}</span>{availableSqft > 0 ? <span className="badge status-confirmed">{copy.available}</span> : <span className="badge status-rejected">{copy.full}</span>}</div>
       </div>
 
       <div className="wcard-stats">
@@ -60,7 +65,7 @@ export default function WarehouseCard({ warehouse, onBook, onOpen, labels }) {
         </div>
         <div className="wcard-stat">
           <span className="wcard-stat-label">{copy.price}</span>
-          <span className="wcard-stat-value">Rs {warehouse.pricePerSqft}/{warehouse.pricingUnit || "month"}</span>
+          <span className="wcard-stat-value">{formatMoney(warehouse.pricePerSqft)}/{warehouse.pricingUnit || "month"}</span>
         </div>
         {Number.isFinite(Number(warehouse.distanceKm)) ? (
           <div className="wcard-stat">
@@ -85,7 +90,7 @@ export default function WarehouseCard({ warehouse, onBook, onOpen, labels }) {
       {(warehouse.supportedCategories || warehouse.produces || []).length ? (
         <div className="chip-row">
           {(warehouse.supportedCategories || warehouse.produces || []).slice(0, 6).map((category) => (
-            <span className="chip" key={category}>{category}</span>
+            <span className="chip" key={category}>{getCategoryLabel(category)}</span>
           ))}
         </div>
       ) : null}
