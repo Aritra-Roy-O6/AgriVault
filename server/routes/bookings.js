@@ -2,6 +2,7 @@ import express from "express";
 import multer from "multer";
 import { db } from "../firebase-admin.js";
 import verifyToken from "../middleware/verifyToken.js";
+import { computeRequiredSqft } from "../storageMath.js";
 
 const router = express.Router();
 const upload = multer({ storage: multer.memoryStorage() });
@@ -104,21 +105,17 @@ router.post("/", verifyToken, async (req, res) => {
       return res.status(400).json({ message: firstMissing[1] });
     }
 
-    const requestedSqft = Number(req.body.sqft);
     const weight = Number(req.body.weight || 0);
     const duration = Number(req.body.duration);
-    const totalPrice = Number(req.body.totalPrice);
+    const totalPriceInput = Number(req.body.totalPrice);
+    const stackable = Boolean(req.body.stackable);
 
-    if (!requestedSqft || requestedSqft <= 0) {
-      return res.status(400).json({ message: "Requested square footage must be greater than zero." });
+    if (!weight || weight <= 0) {
+      return res.status(400).json({ message: "Quantity must be greater than zero." });
     }
 
     if (!duration || duration <= 0) {
       return res.status(400).json({ message: "Duration must be greater than zero." });
-    }
-
-    if (!totalPrice || totalPrice <= 0) {
-      return res.status(400).json({ message: "Total price must be greater than zero." });
     }
 
     const warehouseRef = db.collection("warehouses").doc(req.body.warehouseId);
@@ -153,7 +150,21 @@ router.post("/", verifyToken, async (req, res) => {
         }
       }
 
+      const spaceCalculation = computeRequiredSqft({
+        category: req.body.produce,
+        quantity: weight,
+        stackable,
+        warehouseHeightFt: Number(warehouse.heightFt || 10),
+      });
+      const requestedSqft = Number(spaceCalculation.requiredSqft);
       const { availableSqft } = getWarehouseRefs(warehouse);
+      const totalPrice = Number.isFinite(totalPriceInput) && totalPriceInput > 0
+        ? totalPriceInput
+        : requestedSqft * Number(warehouse.pricePerSqft || 0) * duration;
+
+      if (!totalPrice || totalPrice <= 0) {
+        throw new Error("Total price must be greater than zero.");
+      }
 
       if (availableSqft < requestedSqft) {
         throw new Error("Not enough space available in this godown.");
@@ -173,9 +184,16 @@ router.post("/", verifyToken, async (req, res) => {
         startDate: req.body.startDate,
         totalPrice,
         pricePerSqft: Number(warehouse.pricePerSqft),
+        stackable,
+        warehouseHeightFt: Number(warehouse.heightFt || 10),
+        stackHeightFt: spaceCalculation.stackHeightFt,
+        usableHeightFt: spaceCalculation.usableHeightFt,
+        cubicFtPerUnit: spaceCalculation.cubicFtPerUnit,
+        handlingFactor: spaceCalculation.handlingFactor,
         loanEligibility: Number(req.body.loanEligibility || 0),
         estimatedProduceValue: Number(req.body.estimatedProduceValue || 0),
         gradingSessionId,
+        bookingImage: req.body.bookingImage || null,
         gradeResult: gradingSession
           ? {
               ...gradingSession.normalizedGradeResult,
@@ -341,3 +359,4 @@ router.post("/:id/grade", verifyToken, upload.single("produceImage"), async (req
 });
 
 export default router;
+

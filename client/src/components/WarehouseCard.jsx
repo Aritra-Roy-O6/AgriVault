@@ -1,3 +1,5 @@
+﻿import { formatDistance } from "../locationUtils";
+
 export default function WarehouseCard({ warehouse, onBook, labels }) {
   const totalSqft = warehouse.totalSqft || warehouse.sqft || 0;
   const availableSqft = warehouse.availableSqft || 0;
@@ -11,6 +13,7 @@ export default function WarehouseCard({ warehouse, onBook, labels }) {
     match: labels?.match || "Match",
     occupancy: labels?.occupancy || "Occupancy",
     bestFor: labels?.bestFor || "Best for",
+    distance: labels?.distance || "Distance",
     book: labels?.book || "Book This Space",
   };
 
@@ -22,7 +25,7 @@ export default function WarehouseCard({ warehouse, onBook, labels }) {
             <p className="wcard-name">{warehouse.name}</p>
             <p className="wcard-address">{warehouse.address}</p>
             <p className="section-subtitle" style={{ margin: "6px 0 0" }}>
-              {(warehouse.spaceType || copy.spaceTypeFallback)} � {(warehouse.environmentTags || []).join(", ") || copy.conditionsFallback}
+              {(warehouse.spaceType || copy.spaceTypeFallback)} · {(warehouse.environmentTags || []).join(", ") || copy.conditionsFallback}
             </p>
           </div>
         </div>
@@ -38,6 +41,12 @@ export default function WarehouseCard({ warehouse, onBook, labels }) {
           <span className="wcard-stat-label">{copy.price}</span>
           <span className="wcard-stat-value">Rs {warehouse.pricePerSqft}/{warehouse.pricingUnit || "month"}</span>
         </div>
+        {Number.isFinite(Number(warehouse.distanceKm)) ? (
+          <div className="wcard-stat">
+            <span className="wcard-stat-label">{copy.distance}</span>
+            <span className="wcard-stat-value">{formatDistance(warehouse.distanceKm)}</span>
+          </div>
+        ) : null}
         {warehouse.matchScore ? (
           <div className="wcard-stat">
             <span className="wcard-stat-label">{copy.match}</span>
@@ -48,7 +57,7 @@ export default function WarehouseCard({ warehouse, onBook, labels }) {
 
       {(warehouse.supportedCategories || warehouse.produces || []).length ? (
         <div className="chip-row">
-          {(warehouse.supportedCategories || warehouse.produces || []).slice(0, 4).map((category) => (
+          {(warehouse.supportedCategories || warehouse.produces || []).slice(0, 6).map((category) => (
             <span className="chip" key={category}>{category}</span>
           ))}
         </div>

@@ -4,6 +4,7 @@ import axios from "axios";
 import FormData from "form-data";
 import { v4 as uuidv4 } from "uuid";
 import { db } from "../firebase-admin.js";
+import { uploadBufferToCloudinary, isCloudinaryConfigured } from "../cloudinary.js";
 import verifyToken from "../middleware/verifyToken.js";
 import {
   ensureReceiptRecord,
@@ -226,6 +227,21 @@ router.post("/analyze", verifyToken, upload.single("image"), async (req, res) =>
     const sessionId = uuidv4();
     const compactResult = compactRawResult(rawResult);
     const timestamp = new Date().toISOString();
+    let uploadedImage = null;
+
+    if (isCloudinaryConfigured()) {
+      try {
+        uploadedImage = await uploadBufferToCloudinary({
+          buffer: req.file.buffer,
+          mimetype: req.file.mimetype,
+          folder: "vaultx/grading",
+          publicId: `${farmerUid}-${sessionId}`,
+          tags: ["vaultx", "grading", farmerUid],
+        });
+      } catch (uploadError) {
+        console.error(`[Cloudinary] Grading image upload failed: ${uploadError.message}`);
+      }
+    }
 
     await db.collection("grading_sessions").doc(sessionId).set({
       sessionId,
@@ -372,6 +388,10 @@ router.post("/receipt", verifyToken, async (req, res) => {
 });
 
 export default router;
+
+
+
+
 
 
 

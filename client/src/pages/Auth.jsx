@@ -10,23 +10,20 @@ import { auth, apiBaseUrl } from "../firebase";
 const roleMeta = {
   business: {
     label: "Businessmen",
-    eyebrow: "Blue Flow",
     title: "Storage for inventory and overflow stock",
-    description: "Best for retailers, sellers, traders, and small businesses booking storage in English.",
+    description: "Best for retailers, sellers, traders, and small businesses booking storage.",
     themeClass: "auth-theme-business",
   },
   owner: {
     label: "Space Owners",
-    eyebrow: "Blue Flow",
     title: "List and manage your storage space",
     description: "Best for owners listing rooms, garages, godowns, and warehouse bays.",
     themeClass: "auth-theme-owner",
   },
   farmer: {
     label: "Farmers",
-    eyebrow: "Green Flow",
-    title: "FarmVault for produce storage and grading",
-    description: "Best for farmers who need storage, quality receipts, and optional grading support.",
+    title: "AgriVault for produce storage and grading",
+    description: "Best for farmers who need storage, quality receipts, and grading support.",
     themeClass: "auth-theme-farmer",
   },
 };

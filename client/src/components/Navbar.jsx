@@ -15,7 +15,7 @@ export default function Navbar({ user, role }) {
   const navigate = useNavigate();
   const location = useLocation();
   const isHome = location.pathname === "/";
-  const isDashboardRoute = location.pathname.startsWith("/dashboard");
+  const isPublicPage = isHome || location.pathname === "/auth";
 
   const handleLogout = async () => {
     await signOut(auth);
@@ -38,7 +38,7 @@ export default function Navbar({ user, role }) {
       </button>
 
       <nav className="navbar-nav navbar-nav-minimal">
-        {!isDashboardRoute ? (
+        {!user && isPublicPage ? (
           <NavLink className={linkClass} to="/">
             Home
           </NavLink>
@@ -49,7 +49,7 @@ export default function Navbar({ user, role }) {
           </NavLink>
         ) : (
           <>
-            {!isHome && !isDashboardRoute ? (
+            {!isHome ? (
               <NavLink className={linkClass} to={dashboardPath(role)}>
                 Dashboard
               </NavLink>

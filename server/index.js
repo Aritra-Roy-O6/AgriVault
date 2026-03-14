@@ -9,6 +9,7 @@ import bookingRoutes from "./routes/bookings.js";
 import gradeRoutes from "./routes/grade.js";
 import gradingRoutes from "./routes/grading.js";
 import receiptRoutes from "./routes/receipt.js";
+import uploadRoutes from "./routes/uploads.js";
 import warehouseRoutes from "./routes/warehouses.js";
 
 dotenv.config();
@@ -47,6 +48,7 @@ app.get("/api/health", (_req, res) => {
 
 app.use("/api/auth", authRoutes);
 app.use("/api/warehouses", warehouseRoutes);
+app.use("/api/uploads", uploadRoutes);
 app.use("/api/bookings", bookingRoutes);
 app.use("/api/grade", gradeRoutes);
 app.use("/api/grading", gradingLimiter, gradingRoutes);

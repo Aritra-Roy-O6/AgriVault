@@ -1,10 +1,13 @@
-import { useEffect, useMemo, useState } from "react";
+﻿import { useEffect, useMemo, useState } from "react";
 import { useNavigate } from "react-router-dom";
 import { useTranslation } from "react-i18next";
 import toast from "react-hot-toast";
 import { apiBaseUrl, getAuthHeaders } from "../firebase";
 import MapView from "../components/MapView";
 import WarehouseCard from "../components/WarehouseCard";
+import { attachDistance, hasCoordinates, sortByDistance, withinRadius } from "../locationUtils";
+
+const RADIUS_OPTIONS = [10, 25, 50, 100, 250];
 
 function canOpenReceipt(status) {
   return ["confirmed", "completed"].includes(status);
@@ -18,6 +21,10 @@ export default function FarmerDashboard({ loading: sessionLoading, user }) {
   const [bookings, setBookings] = useState([]);
   const [loadingWh, setLoadingWh] = useState(true);
   const [loadingBk, setLoadingBk] = useState(false);
+  const [buyerLocation, setBuyerLocation] = useState(null);
+  const [radiusKm, setRadiusKm] = useState("50");
+  const [locationLoading, setLocationLoading] = useState(false);
+  const [locationError, setLocationError] = useState("");
 
   useEffect(() => {
     const stored = localStorage.getItem("farmerLanguage") || "en";
@@ -36,7 +43,7 @@ export default function FarmerDashboard({ loading: sessionLoading, user }) {
         setWarehouses(
           (data.warehouses || []).filter((warehouse) =>
             (warehouse.supportedCategories || warehouse.produces || []).some((item) =>
-              ["grains", "fruits", "vegetables", "produce", "wheat", "rice"].includes(String(item).toLowerCase())
+              ["grains", "fruits", "vegetables", "produce", "wheat", "rice", "pulses"].includes(String(item).toLowerCase())
             )
           )
         );
@@ -76,6 +83,16 @@ export default function FarmerDashboard({ loading: sessionLoading, user }) {
     [bookings]
   );
 
+  const nearbyWarehouses = useMemo(() => {
+    const withDistance = attachDistance(warehouses, buyerLocation);
+
+    if (!hasCoordinates(buyerLocation)) {
+      return withDistance;
+    }
+
+    return sortByDistance(withDistance).filter((warehouse) => withinRadius(warehouse.distanceKm, radiusKm));
+  }, [buyerLocation, radiusKm, warehouses]);
+
   const warehouseLabels = useMemo(
     () => ({
       spaceTypeFallback: t("cardSpaceTypeFallback"),
@@ -86,6 +103,7 @@ export default function FarmerDashboard({ loading: sessionLoading, user }) {
       match: t("cardMatch"),
       occupancy: t("cardOccupancy"),
       bestFor: t("cardBestFor"),
+      distance: "Distance",
       book: t("cardBook"),
     }),
     [t]
@@ -99,6 +117,7 @@ export default function FarmerDashboard({ loading: sessionLoading, user }) {
       environment: t("mapEnvironment"),
       general: t("mapGeneral"),
       match: t("mapMatch"),
+      distance: "Distance",
       book: t("mapBook"),
     }),
     [t]
@@ -112,6 +131,50 @@ export default function FarmerDashboard({ loading: sessionLoading, user }) {
   const handleBook = (warehouse) => {
     navigate(`/book?warehouseId=${warehouse.id}`);
   };
+
+  const requestBuyerLocation = () => {
+    if (!("geolocation" in navigator)) {
+      const message = "Location is not supported on this device.";
+      setLocationError(message);
+      toast.error(message);
+      return;
+    }
+
+    setLocationLoading(true);
+    setLocationError("");
+    navigator.geolocation.getCurrentPosition(
+      (position) => {
+        setBuyerLocation({
+          lat: position.coords.latitude,
+          lng: position.coords.longitude,
+        });
+        setLocationLoading(false);
+        toast.success("Showing produce spaces near your location.");
+      },
+      (error) => {
+        const message = error.message || "Unable to access your location.";
+        setLocationError(message);
+        setLocationLoading(false);
+        toast.error(message);
+      },
+      {
+        enableHighAccuracy: true,
+        timeout: 10000,
+        maximumAge: 300000,
+      }
+    );
+  };
+
+  const clearBuyerLocation = () => {
+    setBuyerLocation(null);
+    setLocationError("");
+  };
+
+  const storageSubtitle = loadingWh
+    ? t("loadingSpaces")
+    : hasCoordinates(buyerLocation)
+      ? `${nearbyWarehouses.length} produce space${nearbyWarehouses.length === 1 ? "" : "s"} within ${radiusKm} km`
+      : t("matched", { count: nearbyWarehouses.length });
 
   return (
     <main className="page fade-up dashboard-theme dashboard-theme-farmer">
@@ -151,29 +214,69 @@ export default function FarmerDashboard({ loading: sessionLoading, user }) {
       {activeTab === "storage" ? (
         <section className="page two-column">
           <div style={{ display: "grid", gap: "16px", alignContent: "start" }}>
-            <p className="section-subtitle">
-              {loadingWh ? t("loadingSpaces") : t("matched", { count: warehouses.length })}
-            </p>
+            <div className="card buyer-location-card">
+              <div className="row-between" style={{ alignItems: "flex-end" }}>
+                <div>
+                  <p className="eyebrow">Nearby Storage</p>
+                  <h3 style={{ marginBottom: "8px" }}>Find produce spaces around you</h3>
+                  <p className="section-subtitle" style={{ marginBottom: 0 }}>
+                    Allow location access to sort listings by distance and hide anything outside your chosen radius.
+                  </p>
+                </div>
+                <div className="actions">
+                  <button className="button-secondary" disabled={locationLoading} onClick={requestBuyerLocation} type="button">
+                    {locationLoading ? "Locating..." : "Use My Location"}
+                  </button>
+                  {hasCoordinates(buyerLocation) ? (
+                    <button className="button-ghost" onClick={clearBuyerLocation} type="button">
+                      Clear
+                    </button>
+                  ) : null}
+                </div>
+              </div>
+              <div className="buyer-location-controls">
+                <label className="field">
+                  Radius
+                  <select onChange={(event) => setRadiusKm(event.target.value)} value={radiusKm}>
+                    {RADIUS_OPTIONS.map((value) => (
+                      <option key={value} value={value}>{value} km</option>
+                    ))}
+                  </select>
+                </label>
+                <div className="buyer-location-status">
+                  {hasCoordinates(buyerLocation)
+                    ? `Distance sort is active from ${Number(buyerLocation.lat).toFixed(4)}, ${Number(buyerLocation.lng).toFixed(4)}.`
+                    : "Distance filter will activate after location access is granted."}
+                  {locationError ? <span className="location-error-text"> {locationError}</span> : null}
+                </div>
+              </div>
+            </div>
+
+            <p className="section-subtitle">{storageSubtitle}</p>
             {loadingWh ? (
               <>
                 <div className="skeleton" style={{ height: "160px", borderRadius: "16px" }} />
                 <div className="skeleton" style={{ height: "160px", borderRadius: "16px" }} />
               </>
-            ) : warehouses.length === 0 ? (
+            ) : nearbyWarehouses.length === 0 ? (
               <div className="card">
                 <div className="empty-state">
                   <span className="empty-state-icon">FarmVault</span>
                   <p className="empty-state-title">{t("emptyTitle")}</p>
-                  <p className="empty-state-sub">{t("emptySub")}</p>
+                  <p className="empty-state-sub">
+                    {hasCoordinates(buyerLocation)
+                      ? `No produce-compatible spaces were found within ${radiusKm} km.`
+                      : t("emptySub")}
+                  </p>
                 </div>
               </div>
             ) : (
-              warehouses.map((warehouse) => <WarehouseCard key={warehouse.id} labels={warehouseLabels} onBook={handleBook} warehouse={warehouse} />)
+              nearbyWarehouses.map((warehouse) => <WarehouseCard key={warehouse.id} labels={warehouseLabels} onBook={handleBook} warehouse={warehouse} />)
             )}
           </div>
 
           <div className="card" style={{ padding: 0, overflow: "hidden" }}>
-            <MapView labels={mapLabels} warehouses={warehouses} />
+            <MapView buyerLocation={buyerLocation} labels={mapLabels} warehouses={nearbyWarehouses} />
           </div>
         </section>
       ) : (

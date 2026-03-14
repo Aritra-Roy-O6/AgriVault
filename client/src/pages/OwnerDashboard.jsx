@@ -1,6 +1,9 @@
-import { useEffect, useMemo, useState } from "react";
+ï»¿import { useEffect, useMemo, useState } from "react";
+import { createPortal } from "react-dom";
 import toast from "react-hot-toast";
 import { apiBaseUrl, getAuthHeaders } from "../firebase";
+import { getCategoryLabel, supportedStorageCategories } from "../storageMath";
+import { environmentTagOptions } from "../storageRules";
 
 const emptyWarehouseForm = {
   name: "",
@@ -10,25 +13,127 @@ const emptyWarehouseForm = {
   lng: "",
   totalSqft: "",
   availableSqft: "",
+  heightFt: "10",
   pricePerSqft: "",
   spaceType: "warehouse bay",
-  supportedCategories: "",
-  environmentTags: "",
-  accessHours: "business hours",
+  supportedCategories: [],
+  environmentTags: [],
   pricingUnit: "monthly",
 };
+
+function formatDate(value) {
+  if (!value) return "N/A";
+  return new Date(value).toLocaleDateString("en-IN");
+}
+
+function getEnvironmentLabel(value) {
+  const normalized = String(value || "")
+    .trim()
+    .toLowerCase()
+    .replace(/\s+/g, "-")
+    .replace("cool", "cold");
+  return environmentTagOptions.find((option) => option.value === normalized)?.label || value;
+}
+
+function BookingModal({ booking, onClose, onUpdateStatus }) {
+  if (!booking) {
+    return null;
+  }
+
+  return createPortal(
+    <div className="modal-backdrop" onClick={onClose} role="presentation">
+      <div className="modal-panel" onClick={(event) => event.stopPropagation()} role="dialog" aria-modal="true">
+        <div className="row-between" style={{ marginBottom: "12px" }}>
+          <div>
+            <p className="eyebrow">Booking Details</p>
+            <h3 style={{ margin: 0 }}>{booking.farmerName || "Customer"}</h3>
+          </div>
+          <button className="button-ghost" onClick={onClose} type="button">
+            Close
+          </button>
+        </div>
+
+        <div className="modal-detail-grid">
+          <div className="receipt-meta booking-details-panel" style={{ marginTop: 0, paddingTop: 0, borderTop: "none" }}>
+            <div className="receipt-row"><span>Booking ID</span><strong>{booking.id}</strong></div>
+            <div className="receipt-row"><span>Status</span><strong>{booking.status}</strong></div>
+            <div className="receipt-row"><span>Phone</span><strong>{booking.phone || "N/A"}</strong></div>
+            <div className="receipt-row"><span>Storage Space</span><strong>{booking.warehouseName || "N/A"}</strong></div>
+            <div className="receipt-row"><span>Category</span><strong>{booking.produce || booking.storageCategory || "N/A"}</strong></div>
+            <div className="receipt-row"><span>Stackable</span><strong>{booking.stackable ? "Yes" : "No"}</strong></div>
+            <div className="receipt-row"><span>Weight / Quantity</span><strong>{booking.weight || 0}</strong></div>
+            <div className="receipt-row"><span>Reserved Sq Ft</span><strong>{booking.sqft || 0}</strong></div>
+            <div className="receipt-row"><span>Warehouse Height</span><strong>{Number(booking.warehouseHeightFt || 10).toFixed(1)} ft</strong></div>
+            <div className="receipt-row"><span>Used Stack Height</span><strong>{Number(booking.stackHeightFt || 0).toFixed(1)} ft</strong></div>
+            <div className="receipt-row"><span>Duration</span><strong>{booking.duration || 0}</strong></div>
+            <div className="receipt-row"><span>Start Date</span><strong>{formatDate(booking.startDate)}</strong></div>
+            <div className="receipt-row"><span>Created At</span><strong>{formatDate(booking.createdAt)}</strong></div>
+            <div className="receipt-row"><span>Total Price</span><strong>Rs {Number(booking.totalPrice || 0).toLocaleString("en-IN")}</strong></div>
+            {Number(booking.loanEligibility || 0) > 0 ? <div className="receipt-row"><span>Loan Eligibility</span><strong>Rs {Number(booking.loanEligibility || 0).toLocaleString("en-IN")}</strong></div> : null}
+            {booking.gradeResult ? (
+              <>
+                <div className="receipt-row"><span>Grade</span><strong>{booking.gradeResult.grade || "N/A"}</strong></div>
+                <div className="receipt-row"><span>Score</span><strong>{booking.gradeResult.score ?? booking.gradeResult.overall_quality_score ?? "N/A"}</strong></div>
+                <div className="receipt-row"><span>Standard</span><strong>{booking.gradeResult.standard || booking.gradeResult.standard_reference || "N/A"}</strong></div>
+                <div className="receipt-row"><span>Defects</span><strong>{booking.gradeResult.defects || "None detected"}</strong></div>
+              </>
+            ) : null}
+          </div>
+
+          <div className="modal-image-panel">
+            {booking.bookingImage?.url ? (
+              <img alt="Uploaded goods" className="modal-booking-image" src={booking.bookingImage.url} />
+            ) : (
+              <div className="empty-state" style={{ padding: "24px 12px" }}>
+                <span className="empty-state-icon">Image</span>
+                <p className="empty-state-title">No uploaded image</p>
+              </div>
+            )}
+          </div>
+        </div>
+
+        {booking.status === "pending" ? (
+          <div className="booking-card-actions" style={{ marginTop: "16px" }}>
+            <button className="button" onClick={() => onUpdateStatus(booking.id, "confirmed")} type="button">
+              Confirm
+            </button>
+            <button className="button-secondary button-danger" onClick={() => onUpdateStatus(booking.id, "rejected")} type="button">
+              Reject
+            </button>
+          </div>
+        ) : null}
+      </div>
+    </div>,
+    document.body
+  );
+}
 
 export default function OwnerDashboard({ loading: sessionLoading, user }) {
   const [activeTab, setActiveTab] = useState("listings");
   const [warehouses, setWarehouses] = useState([]);
   const [bookings, setBookings] = useState([]);
+  const [selectedBooking, setSelectedBooking] = useState(null);
   const [form, setForm] = useState(emptyWarehouseForm);
   const [saving, setSaving] = useState(false);
   const [loadingWh, setLoadingWh] = useState(true);
   const [loadingBk, setLoadingBk] = useState(false);
 
-  const updateForm = (e) =>
-    setForm((current) => ({ ...current, [e.target.name]: e.target.value }));
+  const updateForm = (event) => {
+    const { name, value } = event.target;
+    setForm((current) => ({ ...current, [name]: value }));
+  };
+
+  const toggleMultiSelect = (fieldName, value) => {
+    setForm((current) => {
+      const currentValues = current[fieldName] || [];
+      return {
+        ...current,
+        [fieldName]: currentValues.includes(value)
+          ? currentValues.filter((item) => item !== value)
+          : [...currentValues, value],
+      };
+    });
+  };
 
   useEffect(() => {
     if (sessionLoading || !user) {
@@ -39,9 +144,7 @@ export default function OwnerDashboard({ loading: sessionLoading, user }) {
       setLoadingWh(true);
       try {
         const headers = await getAuthHeaders();
-        const res = await fetch(`${apiBaseUrl}/api/warehouses/owner/${user.uid}`, {
-          headers,
-        });
+        const res = await fetch(`${apiBaseUrl}/api/warehouses/owner/${user.uid}`, { headers });
         const data = await res.json();
         if (!res.ok) throw new Error(data.message || "Unable to load listings.");
         setWarehouses(data.warehouses || []);
@@ -62,9 +165,7 @@ export default function OwnerDashboard({ loading: sessionLoading, user }) {
       setLoadingBk(true);
       try {
         const headers = await getAuthHeaders();
-        const res = await fetch(`${apiBaseUrl}/api/bookings/owner/${user.uid}`, {
-          headers,
-        });
+        const res = await fetch(`${apiBaseUrl}/api/bookings/owner/${user.uid}`, { headers });
         const data = await res.json();
         if (!res.ok) throw new Error(data.message || "Unable to load bookings.");
         setBookings(data.bookings || []);
@@ -76,8 +177,19 @@ export default function OwnerDashboard({ loading: sessionLoading, user }) {
     })();
   }, [activeTab, sessionLoading, user]);
 
-  const handleAddWarehouse = async (e) => {
-    e.preventDefault();
+  const handleAddWarehouse = async (event) => {
+    event.preventDefault();
+
+    if (!form.supportedCategories.length) {
+      toast.error("Select at least one supported category.");
+      return;
+    }
+
+    if (!form.environmentTags.length) {
+      toast.error("Select at least one environment tag.");
+      return;
+    }
+
     setSaving(true);
     try {
       const headers = await getAuthHeaders();
@@ -95,12 +207,12 @@ export default function OwnerDashboard({ loading: sessionLoading, user }) {
           lng: parseFloat(form.lng),
           sqft: parseInt(form.totalSqft, 10),
           availableSqft: parseInt(form.availableSqft, 10),
+          heightFt: parseFloat(form.heightFt),
           pricePerSqft: parseFloat(form.pricePerSqft),
           spaceType: form.spaceType,
           supportedCategories: form.supportedCategories,
           produces: form.supportedCategories,
           environmentTags: form.environmentTags,
-          accessHours: form.accessHours,
           pricingUnit: form.pricingUnit,
         }),
       });
@@ -130,6 +242,7 @@ export default function OwnerDashboard({ loading: sessionLoading, user }) {
       const data = await res.json();
       if (!res.ok) throw new Error(data.message || "Unable to update booking.");
       setBookings((prev) => prev.map((booking) => (booking.id === bookingId ? { ...booking, status } : booking)));
+      setSelectedBooking((current) => (current?.id === bookingId ? { ...current, status } : current));
       toast.success(`Booking ${status}.`);
     } catch (err) {
       toast.error(err.message);
@@ -184,39 +297,56 @@ export default function OwnerDashboard({ loading: sessionLoading, user }) {
                 </div>
               </div>
             ) : (
-              warehouses.map((warehouse) => (
-                <div className="card" key={warehouse.id}>
-                  <div className="wcard-header" style={{ marginBottom: "10px" }}>
-                    <div style={{ display: "flex", gap: "12px", alignItems: "flex-start", flex: 1 }}>
-                      <div className="wcard-icon">Space</div>
-                      <div>
-                        <p className="wcard-name">{warehouse.name}</p>
-                        <p className="wcard-address">{warehouse.address}</p>
-                        <p className="section-subtitle" style={{ margin: "6px 0 0" }}>
-                          {warehouse.spaceType || "storage space"} · {(warehouse.environmentTags || []).join(", ") || "general conditions"}
-                        </p>
+              warehouses.map((warehouse) => {
+                const categories = warehouse.supportedCategories || warehouse.produces || [];
+                const environmentTags = warehouse.environmentTags || [];
+
+                return (
+                  <div className="card" key={warehouse.id}>
+                    <div className="wcard-header" style={{ marginBottom: "10px" }}>
+                      <div style={{ display: "flex", gap: "12px", alignItems: "flex-start", flex: 1 }}>
+                        <div className="wcard-icon">Space</div>
+                        <div>
+                          <p className="wcard-name">{warehouse.name}</p>
+                          <p className="wcard-address">{warehouse.address}</p>
+                          <p className="section-subtitle" style={{ margin: "6px 0 0" }}>
+                            {warehouse.spaceType || "storage space"} | {environmentTags.map(getEnvironmentLabel).join(", ") || "general conditions"} | {warehouse.heightFt || 10} ft high
+                          </p>
+                        </div>
                       </div>
+                      <span className={warehouse.availableSqft > 0 ? "badge status-confirmed" : "badge status-rejected"}>
+                        {warehouse.availableSqft > 0 ? "Active" : "Full"}
+                      </span>
                     </div>
-                    <span className={warehouse.availableSqft > 0 ? "badge status-confirmed" : "badge status-rejected"}>
-                      {warehouse.availableSqft > 0 ? "Active" : "Full"}
-                    </span>
+                    <div className="wcard-stats">
+                      <div className="wcard-stat"><span className="wcard-stat-label">Available</span><span className="wcard-stat-value">{warehouse.availableSqft} sq ft</span></div>
+                      <div className="wcard-stat"><span className="wcard-stat-label">Total</span><span className="wcard-stat-value">{warehouse.sqft} sq ft</span></div>
+                      <div className="wcard-stat"><span className="wcard-stat-label">Height</span><span className="wcard-stat-value">{warehouse.heightFt || 10} ft</span></div>
+                      <div className="wcard-stat"><span className="wcard-stat-label">Pricing</span><span className="wcard-stat-value">Rs {warehouse.pricePerSqft}/{warehouse.pricingUnit || "month"}</span></div>
+                    </div>
+                    {categories.length ? (
+                      <div className="listing-detail-block">
+                        <p className="listing-detail-label">Supported Categories</p>
+                        <div className="chip-row">
+                          {categories.map((category) => (
+                            <span className="chip" key={category}>{getCategoryLabel(category)}</span>
+                          ))}
+                        </div>
+                      </div>
+                    ) : null}
+                    {environmentTags.length ? (
+                      <div className="listing-detail-block">
+                        <p className="listing-detail-label">Environment Tags</p>
+                        <div className="check-chip-row">
+                          {environmentTags.map((tag) => (
+                            <span className="check-chip" key={tag}>{getEnvironmentLabel(tag)}</span>
+                          ))}
+                        </div>
+                      </div>
+                    ) : null}
                   </div>
-                  <div className="wcard-stats">
-                    <div className="wcard-stat">
-                      <span className="wcard-stat-label">Available</span>
-                      <span className="wcard-stat-value">{warehouse.availableSqft} sq ft</span>
-                    </div>
-                    <div className="wcard-stat">
-                      <span className="wcard-stat-label">Total</span>
-                      <span className="wcard-stat-value">{warehouse.sqft} sq ft</span>
-                    </div>
-                    <div className="wcard-stat">
-                      <span className="wcard-stat-label">Pricing</span>
-                      <span className="wcard-stat-value">Rs {warehouse.pricePerSqft}/{warehouse.pricingUnit || "month"}</span>
-                    </div>
-                  </div>
-                </div>
-              ))
+                );
+              })
             )}
           </div>
 
@@ -270,34 +400,57 @@ export default function OwnerDashboard({ loading: sessionLoading, user }) {
               </div>
               <div className="form-row">
                 <label>
+                  Clear Height (ft)
+                  <input name="heightFt" onChange={updateForm} placeholder="10" required step="0.1" type="number" value={form.heightFt} />
+                </label>
+                <label>
                   Price per Sq Ft
                   <input name="pricePerSqft" onChange={updateForm} placeholder="12" required step="0.1" type="number" value={form.pricePerSqft} />
                 </label>
-                <label>
-                  Pricing Unit
-                  <select name="pricingUnit" onChange={updateForm} value={form.pricingUnit}>
-                    <option value="daily">Daily</option>
-                    <option value="weekly">Weekly</option>
-                    <option value="monthly">Monthly</option>
-                  </select>
-                </label>
               </div>
               <label>
-                Supported Categories
-                <input name="supportedCategories" onChange={updateForm} placeholder="clothes, electronics, grains" required value={form.supportedCategories} />
-              </label>
-              <label>
-                Environment Tags
-                <input name="environmentTags" onChange={updateForm} placeholder="dry, secure, covered" required value={form.environmentTags} />
-              </label>
-              <label>
-                Access Hours
-                <select name="accessHours" onChange={updateForm} value={form.accessHours}>
-                  <option value="business hours">Business hours</option>
-                  <option value="extended hours">Extended hours</option>
-                  <option value="24/7">24/7</option>
+                Pricing Unit
+                <select name="pricingUnit" onChange={updateForm} value={form.pricingUnit}>
+                  <option value="daily">Daily</option>
+                  <option value="weekly">Weekly</option>
+                  <option value="monthly">Monthly</option>
                 </select>
               </label>
+
+              <fieldset className="field option-fieldset">
+                <legend>Supported Categories</legend>
+                <p className="field-hint">Pick the categories this space can safely store.</p>
+                <div className="option-grid">
+                  {supportedStorageCategories.map((category) => (
+                    <label className="checkbox-item option-card" key={category}>
+                      <input
+                        checked={form.supportedCategories.includes(category)}
+                        onChange={() => toggleMultiSelect("supportedCategories", category)}
+                        type="checkbox"
+                      />
+                      <span>{getCategoryLabel(category)}</span>
+                    </label>
+                  ))}
+                </div>
+              </fieldset>
+
+              <fieldset className="field option-fieldset">
+                <legend>Environment Tags</legend>
+                <p className="field-hint">Add the conditions buyers can expect in this space.</p>
+                <div className="option-grid">
+                  {environmentTagOptions.map((option) => (
+                    <label className="checkbox-item option-card" key={option.value}>
+                      <input
+                        checked={form.environmentTags.includes(option.value)}
+                        onChange={() => toggleMultiSelect("environmentTags", option.value)}
+                        type="checkbox"
+                      />
+                      <span>{option.label}</span>
+                    </label>
+                  ))}
+                </div>
+              </fieldset>
+
               <button className="button" disabled={saving} type="submit" style={{ marginTop: "4px" }}>
                 {saving ? "Saving..." : "List Space"}
               </button>
@@ -322,25 +475,28 @@ export default function OwnerDashboard({ loading: sessionLoading, user }) {
           ) : (
             sortedBookings.map((booking) => (
               <article className="booking-card" key={booking.id}>
-                <div className="booking-card-header">
-                  <div>
-                    <p className="booking-card-title">{booking.farmerName || "Customer"} - {booking.warehouseName || "Storage Space"}</p>
-                    <div className="booking-card-meta">
-                      <span>{booking.produce || booking.storageCategory || "general goods"}</span>
-                      <span>{booking.weight || booking.sqft || 0}</span>
-                      <span>{new Date(booking.createdAt).toLocaleDateString("en-IN")}</span>
+                <button className="booking-card-toggle" onClick={() => setSelectedBooking(booking)} type="button">
+                  <div className="booking-card-header">
+                    <div>
+                      <p className="booking-card-title">{booking.farmerName || "Customer"} - {booking.warehouseName || "Storage Space"}</p>
+                      <div className="booking-card-meta">
+                        <span>{booking.produce || booking.storageCategory || "general goods"}</span>
+                        <span>{booking.weight || booking.sqft || 0}</span>
+                        <span>{booking.stackable ? "Stackable" : "Non-stackable"}</span>
+                        <span>{formatDate(booking.createdAt)}</span>
+                      </div>
+                    </div>
+                    <div style={{ display: "flex", gap: "10px", alignItems: "center" }}>
+                      <span className={`badge status-${booking.status}`}>{booking.status}</span>
+                      <span className="booking-expand-indicator">Open</span>
                     </div>
                   </div>
-                  <span className={`badge status-${booking.status}`}>{booking.status}</span>
-                </div>
+                </button>
+
                 {booking.status === "pending" ? (
                   <div className="booking-card-actions">
-                    <button className="button" onClick={() => updateBookingStatus(booking.id, "confirmed")} type="button">
-                      Confirm
-                    </button>
-                    <button className="button-secondary button-danger" onClick={() => updateBookingStatus(booking.id, "rejected")} type="button">
-                      Reject
-                    </button>
+                    <button className="button" onClick={() => updateBookingStatus(booking.id, "confirmed")} type="button">Confirm</button>
+                    <button className="button-secondary button-danger" onClick={() => updateBookingStatus(booking.id, "rejected")} type="button">Reject</button>
                   </div>
                 ) : null}
               </article>
@@ -348,6 +504,9 @@ export default function OwnerDashboard({ loading: sessionLoading, user }) {
           )}
         </section>
       )}
+
+      <BookingModal booking={selectedBooking} onClose={() => setSelectedBooking(null)} onUpdateStatus={updateBookingStatus} />
     </main>
   );
 }
+

@@ -1,32 +1,19 @@
-import { useEffect, useMemo, useRef, useState } from "react";
+﻿import { useEffect, useMemo, useRef, useState } from "react";
 import { Link, useSearchParams } from "react-router-dom";
 import toast from "react-hot-toast";
 import GradeResult from "../components/GradeResult";
 import { apiBaseUrl, auth, getAuthHeaders } from "../firebase";
 import { defaultCategories } from "../storageRules";
+import {
+  computeRequiredSqft,
+  getCategoryLabel,
+  getLoanRate,
+  getQuantityUnit,
+  isFarmCategory,
+} from "../storageMath";
 
 const ALLOWED_IMAGE_TYPES = ["image/png", "image/jpeg", "image/jpg"];
-const DEFAULT_SPACE_PER_UNIT = 2;
 const DURATION_OPTIONS = [1, 2, 4, 8, 12];
-
-const CATEGORY_CONFIG = {
-  clothes: { label: "Clothes", spacePerUnit: 2, unitLabel: "cartons" },
-  fabrics: { label: "Fabrics", spacePerUnit: 3, unitLabel: "rolls" },
-  grains: { label: "Grains", spacePerUnit: 12, unitLabel: "quintals", farm: true, loanRate: 2800 },
-  wheat: { label: "Wheat", spacePerUnit: 12, unitLabel: "quintals", farm: true, loanRate: 2800 },
-  rice: { label: "Rice", spacePerUnit: 12, unitLabel: "quintals", farm: true, loanRate: 3200 },
-  pulses: { label: "Pulses", spacePerUnit: 10, unitLabel: "quintals", farm: true, loanRate: 5500 },
-  vegetables: { label: "Vegetables", spacePerUnit: 14, unitLabel: "crates", farm: true, loanRate: 1800 },
-  fruits: { label: "Fruits", spacePerUnit: 16, unitLabel: "crates", farm: true, loanRate: 4200 },
-  electronics: { label: "Electronics", spacePerUnit: 4, unitLabel: "boxes" },
-  cosmetics: { label: "Cosmetics", spacePerUnit: 2, unitLabel: "cartons" },
-  furniture: { label: "Furniture", spacePerUnit: 20, unitLabel: "items" },
-  decorations: { label: "Decorations", spacePerUnit: 3, unitLabel: "boxes" },
-  tiles: { label: "Tiles", spacePerUnit: 8, unitLabel: "pallets" },
-  "steel/iron": { label: "Steel / Iron", spacePerUnit: 10, unitLabel: "bundles" },
-  produce: { label: "Produce", spacePerUnit: 12, unitLabel: "quintals", farm: true, loanRate: 2500 },
-  other: { label: "Other", spacePerUnit: 4, unitLabel: "units" },
-};
 
 function canOpenReceipt(status) {
   return ["confirmed", "completed"].includes(status);
@@ -34,10 +21,6 @@ function canOpenReceipt(status) {
 
 function isAllowedImage(file) {
   return file && ALLOWED_IMAGE_TYPES.includes(file.type);
-}
-
-function isFarmCategory(category) {
-  return Boolean(CATEGORY_CONFIG[category]?.farm);
 }
 
 function dashboardPath(role) {
@@ -52,10 +35,6 @@ function parseCategoryList(warehouse) {
     .filter(Boolean);
 
   return Array.from(new Set(items));
-}
-
-function getCategoryDetails(category) {
-  return CATEGORY_CONFIG[category] || { label: category || "Goods", spacePerUnit: DEFAULT_SPACE_PER_UNIT, unitLabel: "units" };
 }
 
 function normalizePricingUnit(value) {
@@ -77,7 +56,7 @@ export default function BookSlot({ loading: sessionLoading, role, user }) {
     duration: "1",
     startDate: "",
     phone: "",
-    notes: "",
+    stackable: true,
   });
   const [loading, setLoading] = useState(false);
   const [booking, setBooking] = useState(null);
@@ -88,6 +67,7 @@ export default function BookSlot({ loading: sessionLoading, role, user }) {
   const [gradeResult, setGradeResult] = useState(null);
   const [gradingSessionId, setGradingSessionId] = useState(null);
   const [mlIssue, setMlIssue] = useState(null);
+  const [uploadedImage, setUploadedImage] = useState(null);
 
   useEffect(() => {
     (async () => {
@@ -138,16 +118,22 @@ export default function BookSlot({ loading: sessionLoading, role, user }) {
   }, [categoryOptions]);
 
   const selectedCategory = form.category || categoryOptions[0] || "other";
-  const categoryDetails = getCategoryDetails(selectedCategory);
   const isFarmerFlow = role === "farmer";
   const isFarmVaultFlow = isFarmerFlow && isFarmCategory(selectedCategory);
   const quantity = Number(form.quantity || 0);
   const duration = Number(form.duration || 0);
   const pricePerSqft = Number(selectedWarehouse?.pricePerSqft || 0);
   const pricingUnit = normalizePricingUnit(selectedWarehouse?.pricingUnit);
-  const sqft = quantity * Number(categoryDetails.spacePerUnit || DEFAULT_SPACE_PER_UNIT);
+  const warehouseHeightFt = Number(selectedWarehouse?.heightFt || 10);
+  const spaceCalc = computeRequiredSqft({
+    category: selectedCategory,
+    quantity,
+    stackable: form.stackable,
+    warehouseHeightFt,
+  });
+  const sqft = spaceCalc.requiredSqft;
   const totalPrice = sqft * pricePerSqft * duration;
-  const estimatedProduceValue = isFarmVaultFlow ? quantity * Number(categoryDetails.loanRate || 0) : 0;
+  const estimatedProduceValue = isFarmVaultFlow ? quantity * getLoanRate(selectedCategory) : 0;
   const loanEligibility = estimatedProduceValue * 0.7;
   const detailsComplete =
     Boolean(form.warehouseId) &&
@@ -164,9 +150,9 @@ export default function BookSlot({ loading: sessionLoading, role, user }) {
   };
 
   const updateForm = (event) => {
-    const { name, value } = event.target;
-    setForm((current) => ({ ...current, [name]: value }));
-    if (name === "category") {
+    const { name, value, type, checked } = event.target;
+    setForm((current) => ({ ...current, [name]: type === "checkbox" ? checked : value }));
+    if (name === "category" || name === "stackable") {
       resetGrading();
     }
   };
@@ -187,6 +173,7 @@ export default function BookSlot({ loading: sessionLoading, role, user }) {
 
     setFile(nextFile);
     setPreview(URL.createObjectURL(nextFile));
+    setUploadedImage(null);
     if (isFarmVaultFlow) {
       resetGrading();
     }
@@ -199,6 +186,33 @@ export default function BookSlot({ loading: sessionLoading, role, user }) {
     if (nextFile) {
       handleFile(nextFile);
     }
+  };
+
+  const uploadBookingImage = async (headers) => {
+    if (!file) {
+      return null;
+    }
+
+    if (uploadedImage?.url) {
+      return uploadedImage;
+    }
+
+    const formData = new FormData();
+    formData.append("image", file);
+    formData.append("folder", isFarmVaultFlow ? "vaultx/farmvault" : "vaultx/bookings");
+
+    const response = await fetch(`${apiBaseUrl}/api/uploads/image`, {
+      method: "POST",
+      headers,
+      body: formData,
+    });
+    const data = await response.json();
+    if (!response.ok) {
+      throw new Error(data.message || "Unable to upload booking image.");
+    }
+
+    setUploadedImage(data.asset);
+    return data.asset;
   };
 
   const handleGrade = async () => {
@@ -259,6 +273,7 @@ export default function BookSlot({ loading: sessionLoading, role, user }) {
     setLoading(true);
     try {
       const headers = await getAuthHeaders();
+      const bookingImage = await uploadBookingImage(headers);
       const res = await fetch(`${apiBaseUrl}/api/bookings`, {
         method: "POST",
         headers: {
@@ -277,15 +292,18 @@ export default function BookSlot({ loading: sessionLoading, role, user }) {
           totalPrice,
           loanEligibility,
           estimatedProduceValue,
+          stackable: form.stackable,
           gradingSessionId: gradingSessionId || undefined,
+          bookingImage,
         }),
       });
       const data = await res.json();
       if (!res.ok) throw new Error(data.message || "Unable to create booking.");
       setBooking(data.booking);
+      setUploadedImage(data.booking.bookingImage || bookingImage || null);
       setGradeResult(data.booking.gradeResult || gradeResult);
       setGradingSessionId(data.booking.gradingSessionId || gradingSessionId);
-      toast.success(file ? "Booking submitted. Image preview kept only on this device for now." : "Booking submitted.");
+      toast.success(file ? "Booking submitted. Image uploaded to Cloudinary." : "Booking submitted.");
     } catch (err) {
       toast.error(err.message);
     } finally {
@@ -306,11 +324,14 @@ export default function BookSlot({ loading: sessionLoading, role, user }) {
       const data = await res.json();
       if (!res.ok) throw new Error(data.message || "Unable to refresh booking.");
       setBooking(data.booking);
+      setUploadedImage(data.booking.bookingImage || uploadedImage);
       setGradeResult(data.booking.gradeResult || gradeResult);
       setGradingSessionId(data.booking.gradingSessionId || gradingSessionId);
       toast.success(`Booking status: ${data.booking.status}`);
     } catch (err) {
       toast.error(err.message);
+    } finally {
+      setLoading(false);
     }
   };
 
@@ -336,7 +357,7 @@ export default function BookSlot({ loading: sessionLoading, role, user }) {
                 <option value="">Select a listing...</option>
                 {warehouses.map((warehouse) => (
                   <option key={warehouse.id} value={warehouse.id}>
-                    {warehouse.name} ({warehouse.availableSqft} sq ft available)
+                    {warehouse.name} ({warehouse.availableSqft} sq ft available, {warehouse.heightFt || 10} ft high)
                   </option>
                 ))}
               </select>
@@ -346,14 +367,14 @@ export default function BookSlot({ loading: sessionLoading, role, user }) {
               <select name="category" onChange={updateForm} required value={selectedCategory}>
                 {categoryOptions.map((category) => (
                   <option key={category} value={category}>
-                    {getCategoryDetails(category).label}
+                    {getCategoryLabel(category)}
                   </option>
                 ))}
               </select>
             </label>
             <div className="form-row">
               <label>
-                Quantity ({categoryDetails.unitLabel})
+                Quantity ({getQuantityUnit(selectedCategory)})
                 <input
                   name="quantity"
                   min="0.1"
@@ -386,6 +407,11 @@ export default function BookSlot({ loading: sessionLoading, role, user }) {
                 <input name="phone" onChange={updateForm} placeholder="Contact number" required type="tel" value={form.phone} />
               </label>
             </div>
+            <label className="checkbox-item">
+              <input checked={form.stackable} name="stackable" onChange={updateForm} type="checkbox" />
+              <span>Stackable inventory</span>
+            </label>
+            <p className="field-hint" style={{ marginTop: "-8px" }}>Turn this off for fragile or non-stackable goods.</p>
             <button className="button button-full" disabled={loading || !detailsComplete} type="submit" style={{ marginTop: "4px" }}>
               {loading ? "Submitting..." : "Submit Booking"}
             </button>
@@ -398,19 +424,13 @@ export default function BookSlot({ loading: sessionLoading, role, user }) {
               <p className="eyebrow">Booking Created</p>
               <h3 style={{ marginBottom: "12px" }}>Booking saved</h3>
               <div className="receipt-meta">
-                <div className="receipt-row">
-                  <span>Status</span>
-                  <strong>{booking.status}</strong>
-                </div>
-                <div className="receipt-row">
-                  <span>Booking ID</span>
-                  <strong>{booking.id}</strong>
-                </div>
-                {booking.gradingSessionId ? (
-                  <div className="receipt-row">
-                    <span>Grading Session</span>
-                    <strong>{booking.gradingSessionId}</strong>
-                  </div>
+                <div className="receipt-row"><span>Status</span><strong>{booking.status}</strong></div>
+                <div className="receipt-row"><span>Booking ID</span><strong>{booking.id}</strong></div>
+                <div className="receipt-row"><span>Stackable</span><strong>{booking.stackable ? "Yes" : "No"}</strong></div>
+                <div className="receipt-row"><span>Reserved Sq Ft</span><strong>{booking.sqft}</strong></div>
+                {booking.gradingSessionId ? <div className="receipt-row"><span>Grading Session</span><strong>{booking.gradingSessionId}</strong></div> : null}
+                {booking.bookingImage?.url ? (
+                  <div className="receipt-row"><span>Image</span><a href={booking.bookingImage.url} rel="noreferrer" target="_blank">Open</a></div>
                 ) : null}
               </div>
               <div className="actions">
@@ -427,24 +447,17 @@ export default function BookSlot({ loading: sessionLoading, role, user }) {
           ) : null}
 
           <div className="card calculator-card">
-            <p className="eyebrow">Cost Estimate</p>
-            <h3 style={{ marginBottom: "1rem" }}>Live Breakdown</h3>
-            <div className="cost-row">
-              <span className="cost-row-label">Space Required</span>
-              <span className="cost-row-value">{sqft.toFixed(0)} sq ft</span>
-            </div>
-            <div className="cost-row">
-              <span className="cost-row-label">Rate / sq ft / {pricingUnit}</span>
-              <span className="cost-row-value">Rs {pricePerSqft.toLocaleString("en-IN")}</span>
-            </div>
-            <div className="cost-row">
-              <span className="cost-row-label">Duration</span>
-              <span className="cost-row-value">{duration || 0} {pricingUnit}{duration > 1 ? "s" : ""}</span>
-            </div>
-            <div className="cost-row total-row">
-              <span className="cost-row-label">Storage Cost</span>
-              <span className="cost-row-value">Rs {totalPrice.toLocaleString("en-IN")}</span>
-            </div>
+            <p className="eyebrow">Space Estimate</p>
+            <h3 style={{ marginBottom: "1rem" }}>Storage Calculation</h3>
+            <div className="cost-row"><span className="cost-row-label">Warehouse clear height</span><span className="cost-row-value">{warehouseHeightFt.toFixed(1)} ft</span></div>
+            <div className="cost-row"><span className="cost-row-label">Usable stack height</span><span className="cost-row-value">{spaceCalc.stackHeightFt.toFixed(1)} ft</span></div>
+            <div className="cost-row"><span className="cost-row-label">Stackable</span><span className="cost-row-value">{form.stackable ? "Yes" : "No"}</span></div>
+            <div className="cost-row"><span className="cost-row-label">Floor space required</span><span className="cost-row-value">{sqft} sq ft</span></div>
+            <div className="cost-row"><span className="cost-row-label">Rate / sq ft / {pricingUnit}</span><span className="cost-row-value">Rs {pricePerSqft.toLocaleString("en-IN")}</span></div>
+            <div className="cost-row total-row"><span className="cost-row-label">Storage Cost</span><span className="cost-row-value">Rs {totalPrice.toLocaleString("en-IN")}</span></div>
+            <p style={{ fontSize: "0.82rem", marginTop: "12px" }}>
+              Calculation uses market-style cubic volume, safe stacking height, and aisle/handling allowance.
+            </p>
           </div>
 
           <div className="card">
@@ -472,8 +485,9 @@ export default function BookSlot({ loading: sessionLoading, role, user }) {
               <input accept=".png,.jpg,.jpeg,image/png,image/jpeg" onChange={(event) => handleFile(event.target.files?.[0])} ref={fileRef} style={{ display: "none" }} type="file" />
             </div>
             {file ? <p style={{ fontSize: "0.8rem", marginTop: "12px" }}>File: {file.name}</p> : null}
+            {uploadedImage?.url ? <p style={{ fontSize: "0.8rem", marginTop: "6px" }}>Uploaded to Cloudinary.</p> : null}
             <p style={{ fontSize: "0.82rem", marginTop: "12px" }}>
-              Image preview is local only for now. Cloud storage is not connected yet.
+              Image is stored on Cloudinary and the asset reference is saved in Firestore.
             </p>
             {isFarmVaultFlow ? (
               <button className="button button-full" disabled={grading || !detailsComplete || !file} onClick={handleGrade} style={{ marginTop: "8px" }} type="button">
@@ -487,20 +501,6 @@ export default function BookSlot({ loading: sessionLoading, role, user }) {
             ) : null}
           </div>
 
-          {isFarmVaultFlow ? (
-            <div className="card">
-              <p className="eyebrow">FarmVault</p>
-              <h3 style={{ marginBottom: "1rem" }}>Loan Eligibility</h3>
-              <div className="cost-row">
-                <span className="cost-row-label">Estimated produce value</span>
-                <span className="cost-row-value">Rs {estimatedProduceValue.toLocaleString("en-IN")}</span>
-              </div>
-              <div className="cost-row total-row">
-                <span className="cost-row-label">Potential micro-loan value</span>
-                <span className="cost-row-value">Rs {loanEligibility.toLocaleString("en-IN")}</span>
-              </div>
-            </div>
-          ) : null}
 
           {gradeResult ? (
             <div className="card">
@@ -520,3 +520,4 @@ export default function BookSlot({ loading: sessionLoading, role, user }) {
     </main>
   );
 }
+
